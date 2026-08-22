@@ -665,6 +665,16 @@ Two details that matter in practice:
   `response_types` to `["code"]`, which would declare a client that visits the
   authorization endpoint. This one never does.
 
+**Client ID Metadata Documents** — the option MCP ranks *above* dynamic
+registration — are not implemented, because they cannot be: the `client_id` must
+be an HTTPS URL the authorization server can fetch, and a command-line runner has
+nowhere to host one. If you already host such a document, pass its URL as the
+client id and it is used as-is:
+
+```bash
+npx @hasmcp/mcp-spec-test@latest -u "$URL" --client-id https://example.com/client.json
+```
+
 RFC 8414 §3 requires the metadata path to use `https`. Loopback targets are
 treated as fixtures; any other non-https endpoint gets a warning, because the
 token being negotiated would cross the network in clear text.
