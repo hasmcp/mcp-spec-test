@@ -666,14 +666,24 @@ Two details that matter in practice:
   authorization endpoint. This one never does.
 
 **Client ID Metadata Documents** — the option MCP ranks *above* dynamic
-registration — are not implemented, because they cannot be: the `client_id` must
-be an HTTPS URL the authorization server can fetch, and a command-line runner has
-nowhere to host one. If you already host such a document, pass its URL as the
-client id and it is used as-is:
+registration — are not used here, and the reason is a constraint in the draft
+rather than an oversight. A metadata document cannot carry a shared secret:
 
-```bash
-npx @hasmcp/mcp-spec-test@latest -u "$URL" --client-id https://example.com/client.json
-```
+> the `token_endpoint_auth_method` property **MUST NOT** include
+> `client_secret_post`, `client_secret_basic`, `client_secret_jwt`, or any other
+> method based around a shared symmetric secret […] the `client_secret` and
+> `client_secret_expires_at` properties **MUST NOT** be used
+
+The `client_credentials` grant is authenticated *only* by the client credential,
+so under that restriction the sole way to use it is `private_key_jwt` with a
+published `jwks_uri` — which needs a private key. A tool published to npm cannot
+ship one; a secret shared with everybody is not a secret.
+
+So the two mechanisms serve different clients: a metadata document identifies a
+*public* client for the browser-based `authorization_code` flow, and dynamic
+registration is what gets a browserless runner an authenticated client. You can
+pass a URL-form `client_id`, and it is sent as given, but without a private key
+the authorization server has nothing to authenticate it with.
 
 RFC 8414 §3 requires the metadata path to use `https`. Loopback targets are
 treated as fixtures; any other non-https endpoint gets a warning, because the
