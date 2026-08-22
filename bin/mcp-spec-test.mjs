@@ -221,6 +221,18 @@ if (env.MCP_URL && env.MCP_COMMAND) {
   process.exit(2)
 }
 
+// parseHeaderList reads the "k: v, k2: v2" form used by --header.
+function parseHeaderList(raw) {
+  if (!raw) return {}
+  const out = {}
+  for (const pair of raw.split(',')) {
+    const idx = pair.indexOf(':')
+    if (idx === -1) continue
+    out[pair.slice(0, idx).trim().toLowerCase()] = pair.slice(idx + 1).trim()
+  }
+  return out
+}
+
 // Obtain a bearer token when the endpoint wants one and none was supplied.
 //
 // Done here rather than in the tests for the same reason as revision detection:
@@ -231,7 +243,16 @@ async function maybeAuthenticate() {
 
   const oauth = await import(`file://${join(root, 'lib', 'oauth.mjs')}`)
 
-  const probe = await oauth.probeChallenge(env.MCP_URL)
+  // Send whatever the caller already configured: a `?token=` already in the URL,
+  // and any headers from --header. If those are enough, the endpoint answers and
+  // there is nothing to negotiate.
+  //
+  // Parsed here rather than imported from lib/env.mjs on purpose. That module
+  // computes its exports once, at import time, from process.env — so importing it
+  // before the flag-derived values are in place would freeze the wrong ones and
+  // the cached copy would still be wrong later, when a token from this flow
+  // matters. It stays unimported until everything it reads is settled.
+  const probe = await oauth.probeChallenge(env.MCP_URL, parseHeaderList(env.MCP_EXTRA_HEADERS))
   if (probe.status !== 401) return // not an authenticated endpoint, or already open
 
   process.stderr.write('endpoint returned 401; discovering OAuth configuration\n')

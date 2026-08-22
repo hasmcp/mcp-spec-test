@@ -557,9 +557,28 @@ it. The `@` form works through the environment variables too
 (`MCP_TOOL_ARGS=@/etc/mcp/tool-args.json`), which keeps a large argument set out
 of a CI command line.
 
+### How credentials are chosen
+
+Whatever you already have is used, and OAuth is a last resort rather than a first
+move:
+
+| what you pass | what happens |
+| --- | --- |
+| nothing, and the endpoint is public | it just runs — no credential, no probe result to act on |
+| `?token=…` already in the URL | used as-is; the endpoint answers, so nothing is negotiated |
+| `-t <token>` | sent per `--auth-mode` (header by default) |
+| `-H "authorization: Bearer …"` or any custom header | sent as given |
+| nothing, and the endpoint answers `401` | the OAuth flow below |
+
+The check is one request: whatever credentials you configured are sent, and if the
+endpoint answers, there is nothing to negotiate. That matters — probing without
+them would manufacture a `401` and go off registering a client for someone who had
+already supplied a credential.
+
 ### OAuth 2.1
 
-An endpoint that answers `401` is handled without being told to. The suite walks
+An endpoint that answers `401` **with no credential supplied** is handled without
+being told to. The suite walks
 the discovery chain the spec defines, uses client credentials if you have them,
 and registers a client dynamically if you do not:
 
