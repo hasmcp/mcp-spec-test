@@ -30,7 +30,7 @@ jobs:
 
       - name: every module parses and loads
         run: |
-          for f in lib/*.mjs bin/*.mjs tests/*.test.mjs; do
+          for f in lib/*.mjs bin/*.mjs tests/*.test.mjs tests/unit/*.test.mjs; do
             node --check "$f"
           done
           node -e "import('./lib/schema.mjs').then(m => console.log('schema:', m.SPEC_PATH))"

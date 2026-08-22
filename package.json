@@ -26,6 +26,7 @@
     "bin/",
     "lib/",
     "tests/",
+    "!tests/unit/",
     "spec/",
     "README.md",
     "LICENSE"
@@ -39,7 +40,8 @@
   "scripts": {
     "test": "node bin/mcp-spec-test.mjs",
     "test:raw": "node --test \"tests/**/*.test.mjs\"",
-    "check:readme": "node scripts/check-readme-cases.mjs"
+    "check:readme": "node scripts/check-readme-cases.mjs",
+    "test:unit": "node --test \"tests/unit/*.test.mjs\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"

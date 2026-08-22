@@ -49,6 +49,9 @@ const FLAGS = {
   '--client-id': 'MCP_CLIENT_ID',
   '--client-secret': 'MCP_CLIENT_SECRET',
   '--scope': 'MCP_SCOPE',
+  '--redirect-host': 'MCP_REDIRECT_HOST',
+  '--redirect-port': 'MCP_REDIRECT_PORT',
+  '--auth-timeout': 'MCP_AUTH_TIMEOUT_MS',
 }
 
 const USAGE = `
@@ -80,11 +83,32 @@ OAuth 2.1, when the endpoint requires it
       --scope <scope>          scope to request                        [MCP_SCOPE]
       --no-register            do not register a client dynamically, even if the
                                authorization server offers it   [MCP_NO_REGISTER]
+      --interactive            sign in through a browser (authorization_code +
+                               PKCE, loopback redirect) even where a machine
+                               grant exists            [MCP_OAUTH_INTERACTIVE=always]
+      --no-interactive         never open a browser; fail instead
+                                                       [MCP_OAUTH_INTERACTIVE=never]
+      --no-browser             print the authorization URL rather than launching
+                               a browser, for SSH and containers  [MCP_NO_BROWSER]
+      --redirect-host <host>   loopback host for the redirect (default 127.0.0.1;
+                               use localhost for a server that only allows it)
+                                                                 [MCP_REDIRECT_HOST]
+      --redirect-port <n>      pin the redirect port instead of taking a free one,
+                               for a server that will not allow a varying port
+                                                                 [MCP_REDIRECT_PORT]
+      --auth-timeout <ms>      how long to wait for the browser redirect
+                               (default 180000)               [MCP_AUTH_TIMEOUT_MS]
 
   With no --token, an endpoint that answers 401 is discovered per the spec:
   WWW-Authenticate, then protected-resource metadata, then the authorization
   server. Client credentials are used if given; otherwise a client is registered
   dynamically when the server supports it. Every step is printed.
+
+  Which grant runs: client_credentials where the authorization server offers it,
+  since that needs nobody present. Where it does not — many servers only do
+  authorization_code — a browser opens and you sign in, but only when there is a
+  terminal to notice it and CI is not set. --interactive and --no-interactive
+  decide it outright.
 
 Suite
       --spec-version <date>    revision to test; one of the supported window
@@ -152,6 +176,18 @@ for (let i = 0; i < argv.length; i++) {
   }
   if (arg === '--no-register') {
     env.MCP_NO_REGISTER = '1'
+    continue
+  }
+  if (arg === '--interactive') {
+    env.MCP_OAUTH_INTERACTIVE = 'always'
+    continue
+  }
+  if (arg === '--no-interactive') {
+    env.MCP_OAUTH_INTERACTIVE = 'never'
+    continue
+  }
+  if (arg === '--no-browser') {
+    env.MCP_NO_BROWSER = '1'
     continue
   }
   if (arg === '--verbose') {
@@ -233,6 +269,27 @@ function parseHeaderList(raw) {
   return out
 }
 
+// resolveInteractive decides whether a browser may be opened.
+//
+// The default is 'auto', and what it resolves to is a fact about the process
+// rather than about OAuth: a browser flow needs somebody sitting there. So it
+// requires a terminal on stderr — where every line of the flow is printed,
+// including the URL to visit — and it stands down when CI is set, because a
+// build agent has no browser and an unattended job that waited three minutes for
+// a redirect that can never arrive is worse than one that fails immediately with
+// a reason.
+//
+// Both can be overridden, since neither heuristic is always right: a developer
+// piping output to a file still has a browser, and a self-hosted runner with CI
+// set might legitimately be driven by hand.
+function resolveInteractive() {
+  const explicit = env.MCP_OAUTH_INTERACTIVE
+  if (explicit === 'always' || explicit === 'never') return explicit
+  if (!process.stderr.isTTY) return 'never'
+  if (env.CI) return 'never'
+  return 'auto'
+}
+
 // Obtain a bearer token when the endpoint wants one and none was supplied.
 //
 // Done here rather than in the tests for the same reason as revision detection:
@@ -264,6 +321,11 @@ async function maybeAuthenticate() {
       clientSecret: env.MCP_CLIENT_SECRET,
       scope: env.MCP_SCOPE,
       allowRegistration: env.MCP_NO_REGISTER !== '1',
+      interactive: resolveInteractive(),
+      redirectHost: env.MCP_REDIRECT_HOST || '127.0.0.1',
+      redirectPort: Number(env.MCP_REDIRECT_PORT) || 0,
+      timeoutMs: Number(env.MCP_AUTH_TIMEOUT_MS) || 180_000,
+      launchBrowser: env.MCP_NO_BROWSER !== '1',
       challenge: probe.challenge,
       log: (line) => process.stderr.write(`  ${line}\n`),
     })
@@ -384,7 +446,11 @@ if (!env.MCP_SPEC_VERSION) {
   }
 }
 
-const pattern = only ? `tests/**/*${only}*.test.mjs` : 'tests/**/*.test.mjs'
+// Non-recursive on purpose. tests/ holds the conformance cases and tests/unit/
+// holds this package's own tests, and only the first kind belongs in somebody's
+// conformance report — a user asking "is my server conformant" should not be
+// shown a section proving that our PKCE implementation hashes correctly.
+const pattern = only ? `tests/*${only}*.test.mjs` : 'tests/*.test.mjs'
 const args = ['--test']
 
 // Pacing is per process and node:test gives each file its own, so a limit only

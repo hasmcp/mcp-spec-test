@@ -568,7 +568,7 @@ move:
 | `?token=…` already in the URL | used as-is; the endpoint answers, so nothing is negotiated |
 | `-t <token>` | sent per `--auth-mode` (header by default) |
 | `-H "authorization: Bearer …"` or any custom header | sent as given |
-| nothing, and the endpoint answers `401` | the OAuth flow below |
+| nothing, and the endpoint answers `401` | the OAuth flow below — `client_credentials` where the authorization server offers it, a browser sign-in where it does not |
 
 The check is one request: whatever credentials you configured are sent, and if the
 endpoint answers, there is nothing to negotiate. That matters — probing without
@@ -578,9 +578,10 @@ already supplied a credential.
 ### OAuth 2.1
 
 An endpoint that answers `401` **with no credential supplied** is handled without
-being told to. The suite walks
-the discovery chain the spec defines, uses client credentials if you have them,
-and registers a client dynamically if you do not:
+being told to. The suite walks the discovery chain the spec defines, registers a
+client dynamically if you have none, and then takes whichever grant the
+authorization server actually offers — `client_credentials` unattended, or a
+browser sign-in with PKCE where that is the only way in:
 
 ```bash
 # nothing but the URL — a client is registered dynamically
@@ -609,6 +610,12 @@ endpoint returned 401; discovering OAuth configuration
 | `--client-secret` | `MCP_CLIENT_SECRET` | OAuth client secret |
 | `--scope` | `MCP_SCOPE` | scope to request |
 | `--no-register` | `MCP_NO_REGISTER` | never register dynamically, even where offered |
+| `--interactive` | `MCP_OAUTH_INTERACTIVE=always` | sign in through a browser even where a machine grant exists |
+| `--no-interactive` | `MCP_OAUTH_INTERACTIVE=never` | never open a browser; fail with a reason instead |
+| `--no-browser` | `MCP_NO_BROWSER` | print the authorization URL rather than launching a browser |
+| `--redirect-host` | `MCP_REDIRECT_HOST` | loopback host for the redirect (default `127.0.0.1`) |
+| `--redirect-port` | `MCP_REDIRECT_PORT` | pin the redirect port instead of taking a free one |
+| `--auth-timeout` | `MCP_AUTH_TIMEOUT_MS` | how long to wait for the redirect (default `180000`) |
 
 What it implements, and why each part matters:
 
@@ -651,6 +658,9 @@ What it implements, and why each part matters:
 | [RFC 7591](https://www.rfc-editor.org/info/rfc7591) Dynamic Client Registration | JSON POST to `registration_endpoint` (§3.1), `client_id` required in the response (§3.2.1), `error`/`error_description` reported (§3.2.2) |
 | [RFC 8707](https://www.rfc-editor.org/info/rfc8707) Resource Indicators | the `resource` parameter on the token request, from the canonical MCP server URI |
 | [RFC 6749](https://www.rfc-editor.org/info/rfc6749) §4.4 | the `client_credentials` grant |
+| [RFC 6749](https://www.rfc-editor.org/info/rfc6749) §4.1 | the `authorization_code` grant, with `state` verified on the redirect and `redirect_uri` repeated on the exchange |
+| [RFC 7636](https://www.rfc-editor.org/info/rfc7636) PKCE | `S256` only; the challenge is the SHA-256 of the ASCII of the verifier (§4.2), and the verifier accompanies the exchange (§4.5) |
+| [RFC 8252](https://www.rfc-editor.org/info/rfc8252) OAuth for Native Apps | loopback redirect on an ephemeral port (§7.3), `127.0.0.1` in preference to `localhost`, public client with no secret (§8.5) |
 
 Two details that matter in practice:
 
@@ -661,9 +671,11 @@ Two details that matter in practice:
   `token_endpoint_auth_methods_supported`, and both registration and the token
   request go through it. If the server registers a different method than the one
   asked for, its answer wins.
-- **`response_types: []` is deliberate.** RFC 7591 defaults an omitted
-  `response_types` to `["code"]`, which would declare a client that visits the
-  authorization endpoint. This one never does.
+- **`response_types` is always stated, never defaulted.** RFC 7591 defaults an
+  omitted `response_types` to `["code"]`, which declares a client that visits the
+  authorization endpoint. So it is `["code"]` for the interactive flow, which
+  does, and `[]` for `client_credentials`, which never goes near it — rather than
+  leaving a default to say something the client did not mean.
 
 **Client ID Metadata Documents** — the option MCP ranks *above* dynamic
 registration — are not used here, and the reason is a constraint in the draft
@@ -679,11 +691,13 @@ so under that restriction the sole way to use it is `private_key_jwt` with a
 published `jwks_uri` — which needs a private key. A tool published to npm cannot
 ship one; a secret shared with everybody is not a secret.
 
-So the two mechanisms serve different clients: a metadata document identifies a
-*public* client for the browser-based `authorization_code` flow, and dynamic
-registration is what gets a browserless runner an authenticated client. You can
-pass a URL-form `client_id`, and it is sent as given, but without a private key
-the authorization server has nothing to authenticate it with.
+That restriction is no obstacle to the *interactive* flow, which is a public
+client with no secret by design — a metadata document would suit it. What is
+missing is somewhere to publish one: the document has to be fetchable at the
+`client_id` URL, and a package that runs on your machine has no such URL to
+offer. Dynamic registration needs nothing hosted, so that is what both flows use.
+You can pass a URL-form `client_id` and it is sent as given, in which case the
+document is yours to host.
 
 RFC 8414 §3 requires the metadata path to use `https`. Loopback targets are
 treated as fixtures; any other non-https endpoint gets a warning, because the
@@ -693,15 +707,106 @@ token being negotiated would cross the network in clear text.
 test processes; nothing in the package writes to the filesystem, and no token,
 secret or client secret is ever printed. Each run negotiates its own.
 
-**One limit worth stating.** The runner uses the `client_credentials` grant,
-because it has no browser and no user. An authorization server offering only
-`authorization_code` cannot issue it a token, and no amount of code changes that.
-It says so rather than failing obscurely:
+#### Signing in through a browser
+
+Plenty of authorization servers issue no machine grant at all. Asked for
+`client_credentials` they answer with their grant list and nothing else, and for
+a long time that was where this tool stopped — which meant the servers most
+likely to need conformance testing were the ones it could not reach.
+
+So it does what an MCP client does: **`authorization_code` with PKCE and a
+loopback redirect**, per RFC 8252. A short-lived HTTP server binds an ephemeral
+port on `127.0.0.1`, that address becomes the redirect URI, your browser opens,
+and the authorization code arrives on the one request that comes back. The
+server is closed on every path out — including a failure three steps before it
+would have been used.
+
+```bash
+# nothing but the URL. The grant is chosen from what the server offers
+npx @hasmcp/mcp-spec-test@latest -u https://mcp.example.com/mcp
+```
 
 ```
-advertises grant_types_supported ["authorization_code"] — no client_credentials,
-so a runner with no browser cannot obtain a token. Pass one with --token.
+endpoint returned 401; discovering OAuth configuration
+  found protected-resource metadata at https://mcp.example.com/.well-known/oauth-protected-resource/mcp
+  found authorization server metadata at https://mcp.example.com/.well-known/oauth-authorization-server
+  using the authorization_code grant with a loopback redirect and PKCE
+  no client credentials given; registering a client with https://mcp.example.com/oauth2/register for redirect http://127.0.0.1:56029/callback
+  registered client_id dcr-1 using none
+  waiting for you to authorize this run in a browser. If one did not open, visit:
+    https://mcp.example.com/oauth2/authorize?response_type=code&client_id=…
+  authorization code received; exchanging it for a token
+  obtained an access token for resource https://mcp.example.com/mcp
 ```
+
+**Which grant runs, and who decides.** `client_credentials` is preferred wherever
+it is advertised, because it needs nobody present and a CI run that could have
+got a token unattended should not stop to ask for one. The browser flow is what
+happens when there is no machine grant — but only where there is somebody to
+notice it:
+
+| | |
+| --- | --- |
+| a terminal on stderr, `CI` unset | the browser flow is available |
+| output piped, or `CI` set | it is not; the run fails with a reason instead of waiting for a redirect that can never arrive |
+| `--interactive` | the browser flow, even where `client_credentials` exists — "check that the sign-in works" is a fair thing to ask of a conformance tool |
+| `--no-interactive` | never, whatever the terminal says |
+
+Neither heuristic is always right, which is why both switches exist: a developer
+piping output to a file still has a browser, and a self-hosted runner with `CI`
+set might be driven by hand.
+
+**Why PKCE, specifically.** The loopback redirect is the weak point of the
+native-app flow: any process on the machine can race for the port, and the code
+arrives over plain `http`. PKCE (RFC 7636) binds the code to a secret this
+process generated and never transmitted, so an intercepted code is inert. Two
+consequences worth stating:
+
+- **Only `S256`.** A server advertising just `plain` is refused, not
+  accommodated. `plain` puts the verifier itself in the authorization request —
+  through the browser, the address bar, and the server's logs — leaving the flow
+  no safer than one with no PKCE while looking like it had some.
+- **No `code_challenge_methods_supported` is not a blocker.** RFC 8414 makes the
+  field optional and OAuth 2.1 requires `S256` support of every authorization
+  server, so `S256` is attempted anyway — with a note, because a server omitting
+  it is worth knowing about:
+  ```
+  note: the authorization server advertises no code_challenge_methods_supported;
+        attempting S256, which OAuth 2.1 requires of it
+  ```
+
+**A public client, registered as one.** The interactive flow has no secret to
+keep — this package is on npm, and a secret shared with everybody is not a
+secret — so it registers with `token_endpoint_auth_method: none` where the server
+offers it, `grant_types: ["authorization_code"]`, `response_types: ["code"]`, and
+the exact `redirect_uris` it will come back to. Registering the
+`client_credentials` shape and then visiting the authorization endpoint is the
+contradiction that produces `invalid_client` several steps later, where the cause
+is no longer visible.
+
+The order matters too: **the receiver binds before the client registers**, so the
+port in `redirect_uris` is the port that is actually listening. RFC 8252 §7.3
+requires an authorization server to allow a varying port on a loopback redirect;
+`--redirect-port` pins one for the servers that do not, and `--redirect-host
+localhost` covers the ones that only accept that spelling.
+
+**What the browser sees, and what it keeps.** The callback page says one line and
+is served `no-store` with `referrer-policy: no-referrer`. It never contains the
+authorization code — a page that echoed it would put it in the browser's history
+and its cache. A request to any other path is a 404, so the `/favicon.ico` a
+browser asks for unprompted cannot be mistaken for the redirect and abandon a
+flow still in progress.
+
+**What can go wrong, and what it says.** A redirect carrying the wrong `state` is
+refused as not belonging to this request, which is the CSRF the parameter exists
+to prevent. A closed tab becomes `no redirect to http://127.0.0.1:56029/callback
+within 180s` rather than a hang. An `error=access_denied` in the redirect is
+reported as the authorization server's own answer. None of these is fatal to the
+run: cases report themselves **not verified**, as with any refused credential.
+
+One inherent limit: the redirect goes to *your browser's* loopback, so the
+browser has to be on the same machine as the runner. Over SSH, use `--no-browser`
+and forward the port, or pass a token you already hold.
 
 A refused credential is treated like a rate limit, not like a finding: cases
 report themselves **not verified** with the endpoint's own rejection. An
@@ -788,9 +893,20 @@ the environment the tests read and runs them under the reporter in
 | `lib/probe.mjs` | capability discovery, and the guards tests skip on |
 | `lib/session.mjs` | the `initialize` handshake, for revisions that have one |
 | `lib/level.mjs` | the MUST/SHOULD distinction |
-| `lib/oauth.mjs` | OAuth discovery, dynamic registration, tokens |
+| `lib/oauth.mjs` | OAuth discovery, dynamic registration, both grants |
+| `lib/loopback.mjs` | PKCE, the loopback redirect receiver, opening a browser |
 | `lib/reporter.mjs` | the conformance report |
 | `spec/<revision>/schema.json` | the vendored published schemas; the newest is the revision under test |
+| `tests/*.test.mjs` | the conformance cases — what runs against your server |
+| `tests/unit/*.test.mjs` | this package's own tests, for the parts that cannot be checked by eye |
+
+The two kinds of test are kept apart deliberately, and the runner's glob is
+non-recursive so they stay apart. `tests/unit/` verifies *this tool* — that the
+PKCE challenge matches the RFC's test vector, that the loopback receiver refuses
+a redirect with the wrong `state`, that a mock authorization server rejecting a
+bad verifier is noticed — and none of that belongs in a report answering "is my
+server conformant". They are excluded from the published package for the same
+reason. Run them with `npm run test:unit`.
 
 ### Adding a revision
 
