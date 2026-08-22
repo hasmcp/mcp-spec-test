@@ -84,12 +84,14 @@ test('tools/call returns a schema-conformant CallToolResult', async (t) => {
 
   // A tool named in --tool-args is one the operator has vouched for, so it is
   // preferred over an argument-free tool: it exercises argument handling too.
+  if (tools.length === 0) return t.skip('target advertises the tools capability but lists no tools')
+
   const named = tools.find((tool) => TOOL_ARGS[tool.name])
   const safe = named ?? tools.find((tool) => (tool.inputSchema?.required ?? []).length === 0)
   if (!safe) {
     return t.skip(
-      'every advertised tool requires arguments; pass --tool-args \'{"name":{...}}\' to opt in '
-      + 'for tools whose side effects you know',
+      `every advertised tool requires arguments (${tools.map((x) => x.name).join(', ')}); `
+      + 'pass --tool-args \'{"name":{...}}\' to opt in for tools whose side effects you know',
     )
   }
   const args = TOOL_ARGS[safe.name] ?? {}
@@ -135,11 +137,14 @@ test('prompts/get returns messages with a role and content', async (t) => {
   if (!(await requireCapability(t, 'prompts'))) return
 
   const { prompts } = result(await call(methodConst('ListPromptsRequest'), {}), 'prompts/list')
+  if (prompts.length === 0) return t.skip('target advertises the prompts capability but lists no prompts')
+
   const named = prompts.find((p) => PROMPT_ARGS[p.name])
   const safe = named ?? prompts.find((p) => !(p.arguments ?? []).some((a) => a.required))
   if (!safe) {
     return t.skip(
-      'every advertised prompt requires arguments; pass --prompt-args \'{"name":{...}}\' to supply them',
+      `every advertised prompt requires arguments (${prompts.map((x) => x.name).join(', ')}); `
+      + 'pass --prompt-args \'{"name":{...}}\' to supply them',
     )
   }
 
