@@ -47,10 +47,44 @@ Summary
 Verdict: not conformant — 2 requirements violated.
 ```
 
-Exit code is 0 when nothing failed. **Skips do not fail the run**, which is why
-they are printed above the passes: a suite that skips most of itself can look
-green while proving almost nothing, so every skip states the precondition that
-was missing.
+Exit code is 0 when nothing failed.
+
+### "Couldn't check" and "nothing to check" are different sections
+
+A case that does not run means one of two things, and putting them in one list
+makes both useless:
+
+- **NOT VERIFIED** — the requirement applies to this target, but the run could not
+  establish it: a capability was not advertised, a call needed arguments the suite
+  will not invent, a stream never opened. This is the list to work through before
+  claiming conformance, which is why it is printed above the passes.
+- **NOT APPLICABLE** — the revision under test does not define the thing, or the
+  transport has no such requirement. Testing `initialize` against `2026-07-28`
+  is not a gap in the run; that revision replaced the handshake with
+  `server/discover`. These are collapsed to a line per reason and counted apart,
+  because there is nothing to act on.
+
+So a clean run against a server on an older revision says so plainly instead of
+burying it:
+
+```
+NOT APPLICABLE (23) — this revision or transport does not define these; nothing to check
+
+  server/discover
+    6 cases — 2025-11-25 has no server/discover; it negotiates at the handshake instead
+  Result envelope
+    2 cases — 2025-11-25 does not define resultEnvelope
+
+Summary
+  20 passed  0 failed  0 not verified  23 not applicable
+
+Verdict: conformant to 2025-11-25 — every requirement that applies to this
+revision and transport was checked and passed.
+```
+
+Neither kind fails the run. The verdict is drawn from failures and unverified
+cases only: a requirement that cannot exist for this target is not a caveat on
+the result.
 
 ### MUST and SHOULD are reported separately
 

@@ -11,6 +11,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { requireTarget, LATEST_SPEC_VERSION, SUPPORTED_REVISIONS, inWindow } from '../lib/env.mjs'
+import { skipNotApplicable } from '../lib/level.mjs'
 import { probe } from '../lib/probe.mjs'
 import { call, requireNotThrottled, result } from '../lib/rpc.mjs'
 import { FEATURES, methodConst, missingRequired, requiredFields } from '../lib/schema.mjs'
@@ -25,8 +26,10 @@ const DISCOVER = FEATURES.discover ? methodConst('DiscoverRequest') : 'server/di
 // covered in negotiation.test.mjs.
 function requireDiscover(t) {
   if (!FEATURES.discover) {
-    t.skip(`${process.env.MCP_SPEC_VERSION || 'this revision'} has no server/discover; it negotiates at the handshake`)
-    return false
+    return skipNotApplicable(
+      t,
+      `${LATEST_SPEC_VERSION} has no server/discover; it negotiates at the handshake instead`,
+    )
   }
   return true
 }

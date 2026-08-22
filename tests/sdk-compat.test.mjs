@@ -34,6 +34,7 @@ import {
   LATEST_SPEC_VERSION,
   targetURL,
 } from '../lib/env.mjs'
+import { skipNotApplicable } from '../lib/level.mjs'
 import { probe } from '../lib/probe.mjs'
 import { call, requireNotThrottled, rpcError, throttled } from '../lib/rpc.mjs'
 import { tokenize } from '../lib/transport.mjs'
@@ -189,9 +190,17 @@ test('a stock official-SDK client can list tools', async (t) => {
 // endpoint, or one that accepts the token as a query parameter.
 test('a completely unconfigured SDK client works', async (t) => {
   if (!requireTarget(t)) return
-  if (TRANSPORT !== 'http') return t.skip('a stdio target needs no header plumbing; nothing to prove')
+  // Both of these are "this scenario cannot exist here", not "this could not be
+  // checked": stdio has no headers to plumb, and a header-bound credential makes
+  // an unconfigured client impossible by construction.
+  if (TRANSPORT !== 'http') {
+    return skipNotApplicable(t, 'a stdio target needs no header plumbing, so there is nothing to prove')
+  }
   if (MCP_TOKEN && MCP_AUTH_MODE === 'header') {
-    return t.skip(`credentials go in the ${Object.keys(authHeaders())[0]} header, so a client must be configured for it`)
+    return skipNotApplicable(
+      t,
+      `credentials go in the ${Object.keys(authHeaders())[0]} header, so an unconfigured client cannot authenticate`,
+    )
   }
 
   const url = new URL(targetURL())
