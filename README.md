@@ -629,6 +629,22 @@ What it implements, and why each part matters:
 - **Dynamic Client Registration** as the fallback the spec prescribes, with
   `application_type: "native"` — a conformance runner is not a browser and has no
   redirect to come back to.
+- **Tolerance for two deviations seen in the wild**, reported rather than hidden.
+  RFC 9728 defines `authorization_servers` as an array of *issuer identifiers*;
+  some servers send `authorization_server` as a string, and some put the metadata
+  document's URL there instead of the issuer. Both are usable once noticed, and
+  discovery continues while printing what it found:
+  ```
+  note: metadata uses "authorization_server" (a string); RFC 9728 defines
+        "authorization_servers" as an array of issuer identifiers
+  ```
+  Where the value is a metadata URL it is fetched directly, and the document's
+  `issuer` must share its origin — so the anti-spoofing property survives the
+  tolerance.
+
+**The token is never stored.** It is obtained, held in memory, and passed to the
+test processes; nothing in the package writes to the filesystem, and no token,
+secret or client secret is ever printed. Each run negotiates its own.
 
 **One limit worth stating.** The runner uses the `client_credentials` grant,
 because it has no browser and no user. An authorization server offering only
