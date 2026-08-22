@@ -1,18 +1,21 @@
-# Publishes to npm on merge to main.
+# Publishes to npm when a version tag is pushed.
 #
-# Guarded twice, because the normal state of a push to main is "do not publish":
+# Deliberately *not* on push to main. The normal state of a push to main is "do
+# not publish", and a workflow whose default is to publish makes that a matter of
+# remembering — one merge with a bumped version and the package is on the
+# registry, where npm's unpublish window makes it close to irreversible.
 #
-#   - no NPM_TOKEN secret — releases are not enabled yet; skip with a notice
-#   - the version in package.json is already on the registry — a push without a
-#     version bump, which is most of them
+# So publishing is an explicit act with its own gesture:
 #
-# Both skip quietly rather than failing, so "merge a README fix" does not turn
-# into a red build or a duplicate-publish error.
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# which means main can be pushed freely, including work that is finished but not
+# yet meant for anybody else. workflow_dispatch stays for a manual re-run.
 name: publish
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
@@ -35,7 +38,7 @@ jobs:
       # Publishing a suite that does not load would be worse than not publishing.
       - name: verify the package before publishing
         run: |
-          for f in lib/*.mjs bin/*.mjs tests/*.test.mjs; do node --check "$f"; done
+          for f in lib/*.mjs bin/*.mjs tests/*.test.mjs tests/unit/*.test.mjs; do node --check "$f"; done
           node --test "tests/**/*.test.mjs"
           node bin/mcp-spec-test.mjs --help > /dev/null
 
@@ -44,10 +47,12 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -euo pipefail
+
           # No token is a deliberate state, not a broken build: the repository can
-          # sit on main for a while before anyone wants a release. Skip with a
-          # notice so the run stays green and the reason is visible, rather than
-          # failing every push until a secret appears.
+          # sit for a while before anyone wants a release. Skip with a notice so
+          # the run stays green and the reason is visible, rather than failing
+          # until a secret appears.
           if [ -z "${NPM_TOKEN:-}" ]; then
             echo "::notice::NPM_TOKEN is not set, so nothing is published. Add the secret to enable releases."
             echo "publish=false" >> "$GITHUB_OUTPUT"
@@ -56,7 +61,18 @@ jobs:
 
           NAME=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # A tag naming one version while package.json says another would
+          # publish something other than what the tag claims. That is worth
+          # failing over rather than resolving in favour of either one.
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            TAGGED="${GITHUB_REF_NAME#v}"
+            if [ "$TAGGED" != "$VERSION" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match package.json version $VERSION"
+              exit 1
+            fi
+          fi
+
           if npm view "$NAME@$VERSION" version > /dev/null 2>&1; then
             echo "$NAME@$VERSION is already on the registry; nothing to do"
             echo "publish=false" >> "$GITHUB_OUTPUT"
@@ -69,12 +85,3 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: tag the release
-        if: steps.check.outputs.publish == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.check.outputs.version }}
-        run: |
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
