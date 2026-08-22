@@ -482,7 +482,7 @@ MCP_URL=https://mcp.example.com/mcp MCP_TOKEN="$TOKEN" npx @hasmcp/mcp-spec-test
 | `--spec-path` | `MCP_SPEC_PATH` | a `schema.json` to assert against instead of the vendored copy |
 | `--default-version` | `MCP_SERVER_DEFAULT_VERSION` | the version the server negotiates for a client declaring none; probed if omitted |
 | `--stream-budget-ms` | `MCP_STREAM_BUDGET_MS` | how long streaming cases wait (default 4000) |
-| `--tool-args` | `MCP_TOOL_ARGS` | arguments per tool, `'{"search":{"query":"x"}}'` — see below |
+| `--tool-args` | `MCP_TOOL_ARGS` | arguments per tool, inline JSON or `@file` — see below |
 | `--prompt-args` | `MCP_PROMPT_ARGS` | arguments per prompt, same shape |
 | `--resource-sample` | `MCP_RESOURCE_SAMPLE` | how many listed resources to read (default 5) |
 | `--page-limit` | `MCP_PAGE_LIMIT` | pages to follow before calling pagination broken (default 10) |
@@ -534,6 +534,28 @@ npx @hasmcp/mcp-spec-test@latest -u "$URL" \
 
 Named tools are *preferred* over argument-free ones, since calling them exercises
 argument handling as well. Anything not named keeps the old behaviour.
+
+An argument set stops being something you want to quote on a command line as soon
+as it has a nested object or an entry per tool, so both flags also take `@path` to
+a file holding the same JSON — the `curl` convention:
+
+```bash
+npx @hasmcp/mcp-spec-test@latest -u "$URL" --tool-args @tool-args.json
+```
+
+```json
+{
+  "webSearch":   { "queryArgs": { "q": "mcp spec conformance" } },
+  "imageSearch": { "queryArgs": { "q": "model context protocol" } }
+}
+```
+
+Relative paths resolve against your shell's working directory, and the file is
+read and validated **before** the run, so a wrong path or malformed JSON is one
+clear error rather than the same failure repeated inside every case that needed
+it. The `@` form works through the environment variables too
+(`MCP_TOOL_ARGS=@/etc/mcp/tool-args.json`), which keeps a large argument set out
+of a CI command line.
 
 ### In CI
 

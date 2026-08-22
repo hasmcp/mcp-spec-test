@@ -16,7 +16,7 @@
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
@@ -92,11 +92,13 @@ Suite
                                                                    [MCP_RETRY_BUDGET_MS]
 
 Opting in to calls the suite will not guess at
-      --tool-args <json>       arguments per tool, '{"search":{"query":"x"}}'.
-                               Without this, tools with required arguments are
-                               skipped rather than called with invented values
+      --tool-args <json|@file> arguments per tool, '{"search":{"query":"x"}}',
+                               or @path to a file containing that JSON. Without
+                               this, tools with required arguments are skipped
+                               rather than called with invented values
                                                                    [MCP_TOOL_ARGS]
-      --prompt-args <json>     arguments per prompt, same shape   [MCP_PROMPT_ARGS]
+      --prompt-args <json|@file>
+                               arguments per prompt, same shape   [MCP_PROMPT_ARGS]
       --resource-sample <n>    how many listed resources to read (default 5)
                                                                    [MCP_RESOURCE_SAMPLE]
       --page-limit <n>         pages to follow before calling pagination broken
@@ -160,6 +162,35 @@ for (let i = 0; i < argv.length; i++) {
     process.exit(2)
   }
   env[key] = value
+}
+
+// `@path` argument files are resolved here, against the shell's working
+// directory, because the tests run with cwd set to the package root — a relative
+// path would otherwise resolve somewhere inside node_modules. Reading them now
+// also means a bad path is reported once, before the run, instead of identically
+// inside every test file that needs it.
+for (const key of ['MCP_TOOL_ARGS', 'MCP_PROMPT_ARGS']) {
+  const value = env[key]
+  if (!value?.startsWith('@')) continue
+
+  const path = value.slice(1)
+  if (!path) {
+    process.stderr.write(`${key} is "@" with no path after it\n`)
+    process.exit(2)
+  }
+
+  const absolute = resolve(process.cwd(), path)
+  try {
+    const parsed = JSON.parse(readFileSync(absolute, 'utf8'))
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      process.stderr.write(`${absolute} must contain a JSON object keyed by name\n`)
+      process.exit(2)
+    }
+  } catch (err) {
+    process.stderr.write(`${key}: cannot use ${absolute} — ${err.message}\n`)
+    process.exit(2)
+  }
+  env[key] = `@${absolute}`
 }
 
 if (!env.MCP_URL && !env.MCP_COMMAND) {
