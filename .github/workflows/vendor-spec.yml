@@ -1,0 +1,110 @@
+# Vendors a newly published spec revision by opening a pull request.
+#
+# The ci.yml spec-freshness job already fails when a revision is published and
+# not vendored here. That is the alarm; this is the response. Without it someone
+# has to notice the red build, find the file, and copy it — which is exactly the
+# manual step that lets "always tests the latest spec" drift.
+#
+# It opens a PR rather than pushing to main. Dropping a schema shifts the
+# revision window and changes what every case asserts, so it wants a human to
+# look at it, even though the diff is one file.
+name: vendor-spec
+
+on:
+  schedule:
+    # Weekly. Revisions ship on the order of months, so polling harder buys
+    # nothing; the CI alarm covers the gap between runs.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: vendor a newer revision if one exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          VENDORED=$(ls spec | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort | tail -1)
+          UPSTREAM=$(gh api repos/modelcontextprotocol/modelcontextprotocol/contents/schema \
+            --jq '.[] | select(.type == "dir") | .name' \
+            | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort | tail -1)
+
+          echo "vendored: $VENDORED"
+          echo "upstream: $UPSTREAM"
+
+          if [ -z "$UPSTREAM" ]; then
+            echo "could not read the upstream listing; nothing to do"
+            exit 0
+          fi
+
+          NEWEST=$(printf '%s\n%s\n' "$VENDORED" "$UPSTREAM" | sort | tail -1)
+          if [ "$NEWEST" = "$VENDORED" ]; then
+            echo "already current"
+            exit 0
+          fi
+
+          BRANCH="vendor-spec-$UPSTREAM"
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+            echo "$BRANCH already exists, so a PR is already open or was closed deliberately"
+            exit 0
+          fi
+
+          mkdir -p "spec/$UPSTREAM"
+          gh api "repos/modelcontextprotocol/modelcontextprotocol/contents/schema/$UPSTREAM/schema.json" \
+            --jq '.content' | base64 -d > "spec/$UPSTREAM/schema.json"
+
+          # A truncated or non-JSON download would land as a schema the suite then
+          # asserts against, so it is checked before anything is committed.
+          node -e "
+            const s = require('./spec/$UPSTREAM/schema.json')
+            const n = Object.keys(s.\$defs || {}).length
+            if (n < 50) throw new Error('only ' + n + ' definitions; this does not look like an MCP schema')
+            console.log('parsed ' + n + ' definitions')
+          "
+
+          # And that the suite still loads with the new revision selected as the
+          # one under test, since that is what merging this would do.
+          MCP_SPEC_VERSION="$UPSTREAM" node -e "
+            import('./lib/schema.mjs').then((m) => console.log('features:', JSON.stringify(m.FEATURES)))
+          "
+
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add "spec/$UPSTREAM/schema.json"
+          git commit -m "Vendor the $UPSTREAM schema
+
+          $UPSTREAM is published upstream and was not vendored here, so the suite
+          was still testing $VENDORED while calling it the latest revision.
+
+          The supported window is derived from this directory, so adding the file
+          is the whole change: $UPSTREAM becomes the revision under test and
+          $VENDORED becomes the compatibility target."
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "Vendor the $UPSTREAM schema" \
+            --body "$UPSTREAM is published upstream and not vendored here.
+
+          Adding \`spec/$UPSTREAM/schema.json\` makes it the revision under test — the
+          window is derived from the directory, so there is no code change to make.
+
+          **Before merging**, run the suite against a server that speaks $UPSTREAM. Cases
+          are selected from the schema's feature set, so a revision that moves features
+          around will change which cases run, and that is worth seeing rather than
+          assuming. Check what \`lib/schema.mjs\` derived:
+
+          \`\`\`
+          MCP_SPEC_VERSION=$UPSTREAM node -e \"import('./lib/schema.mjs').then(m => console.log(m.FEATURES))\"
+          \`\`\`
+
+          Opened by the \`vendor-spec\` workflow." \
+            --head "$BRANCH" --base main

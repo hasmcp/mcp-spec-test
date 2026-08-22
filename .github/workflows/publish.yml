@@ -1,0 +1,80 @@
+# Publishes to npm on merge to main.
+#
+# Guarded twice, because the normal state of a push to main is "do not publish":
+#
+#   - no NPM_TOKEN secret — releases are not enabled yet; skip with a notice
+#   - the version in package.json is already on the registry — a push without a
+#     version bump, which is most of them
+#
+# Both skip quietly rather than failing, so "merge a README fix" does not turn
+# into a red build or a duplicate-publish error.
+name: publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - run: npm ci
+
+      # Publishing a suite that does not load would be worse than not publishing.
+      - name: verify the package before publishing
+        run: |
+          for f in lib/*.mjs bin/*.mjs tests/*.test.mjs; do node --check "$f"; done
+          node --test "tests/**/*.test.mjs"
+          node bin/mcp-spec-test.mjs --help > /dev/null
+
+      - name: should this run publish?
+        id: check
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # No token is a deliberate state, not a broken build: the repository can
+          # sit on main for a while before anyone wants a release. Skip with a
+          # notice so the run stays green and the reason is visible, rather than
+          # failing every push until a secret appears.
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::notice::NPM_TOKEN is not set, so nothing is published. Add the secret to enable releases."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "$NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "$NAME@$VERSION is already on the registry; nothing to do"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: npm publish
+        if: steps.check.outputs.publish == 'true'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: tag the release
+        if: steps.check.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          git tag "v$VERSION"
+          git push origin "v$VERSION"

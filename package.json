@@ -1,0 +1,47 @@
+{
+  "name": "@hasmcp/mcp-spec-test",
+  "version": "1.0.0",
+  "description": "Black-box conformance suite for any MCP server. Tests the two most recent spec revisions (currently 2026-07-28 and 2025-11-25) against the published schema, plus official-SDK interop.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "conformance",
+    "spec",
+    "testing",
+    "json-rpc"
+  ],
+  "license": "Apache-2.0",
+  "author": "HasMCP",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hasmcp/mcp-spec-test.git"
+  },
+  "homepage": "https://github.com/hasmcp/mcp-spec-test#readme",
+  "bugs": "https://github.com/hasmcp/mcp-spec-test/issues",
+  "type": "module",
+  "bin": {
+    "mcp-spec-test": "bin/mcp-spec-test.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "tests/",
+    "spec/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node bin/mcp-spec-test.mjs",
+    "test:raw": "node --test \"tests/**/*.test.mjs\"",
+    "check:readme": "node scripts/check-readme-cases.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  }
+}

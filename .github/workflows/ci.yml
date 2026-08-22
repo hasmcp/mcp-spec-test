@@ -1,0 +1,132 @@
+# Runs on every push and pull request.
+#
+# There is no server to test against here, so this cannot check conformance —
+# what it can check is that the suite itself is sound: it parses, it loads the
+# vendored schema, its assertions agree with that schema, and the CLI behaves.
+# A conformance suite that is broken in a way nobody notices is worse than none.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: every module parses and loads
+        run: |
+          for f in lib/*.mjs bin/*.mjs tests/*.test.mjs; do
+            node --check "$f"
+          done
+          node -e "import('./lib/schema.mjs').then(m => console.log('schema:', m.SPEC_PATH))"
+
+      # The schema-sanity cases assert that the vendored schema really is the
+      # revision the suite claims to test. They need no target, so they run here
+      # and would catch a schema swapped for an older revision.
+      - name: schema-derived assertions agree with the vendored schema
+        run: node --test "tests/**/*.test.mjs"
+
+      # The README lists every case one by one, which is documentation that goes
+      # stale the first time someone adds a case. Checked rather than trusted.
+      - name: the README documents every case
+        run: node scripts/check-readme-cases.mjs
+
+      - name: the CLI refuses an unusable invocation
+        run: |
+          node bin/mcp-spec-test.mjs --help > /dev/null
+          node bin/mcp-spec-test.mjs --version > /dev/null
+
+          # No target is a usage error, not a pass.
+          if node bin/mcp-spec-test.mjs > /dev/null 2>&1; then
+            echo "expected a non-zero exit with no target"; exit 1
+          fi
+
+          # Two targets select two transports; that must be refused, not guessed.
+          if node bin/mcp-spec-test.mjs -u http://x -c "true" > /dev/null 2>&1; then
+            echo "expected a non-zero exit when given both a url and a command"; exit 1
+          fi
+
+  spec-freshness:
+    # "Always support the latest spec" is a promise that decays silently: a new
+    # revision ships, nobody notices, and the suite goes on testing an old one
+    # while still calling it the latest. So the promise is checked rather than
+    # trusted — this job asks the spec repository what revisions exist and fails
+    # when one is newer than anything vendored here.
+    #
+    # It is a separate job on purpose: a stale schema should be loud, but it must
+    # not gate the checks above, and publishing lives in its own workflow.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: is a newer revision published?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          VENDORED=$(ls spec | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort | tail -1)
+          echo "newest vendored revision: $VENDORED"
+
+          # The published schemas live in schema/<revision>/schema.json upstream.
+          UPSTREAM=$(gh api repos/modelcontextprotocol/modelcontextprotocol/contents/schema \
+            --jq '.[] | select(.type == "dir") | .name' \
+            | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort | tail -1)
+          echo "newest published revision: $UPSTREAM"
+
+          if [ -z "$UPSTREAM" ]; then
+            echo "could not read the upstream schema listing; treating as inconclusive rather than stale"
+            exit 0
+          fi
+
+          # Revision ids are ISO dates, so sorting them is ordering them by age.
+          # Done with sort rather than a string comparison operator, which is not
+          # portable across the shells this might run under.
+          NEWEST=$(printf '%s\n%s\n' "$VENDORED" "$UPSTREAM" | sort | tail -1)
+          if [ "$NEWEST" != "$VENDORED" ]; then
+            echo "::error::$UPSTREAM is published but not vendored — the suite is testing $VENDORED."
+            echo "Vendor it: spec/$UPSTREAM/schema.json. The revision window shifts automatically."
+            exit 1
+          fi
+
+          echo "up to date: nothing newer than $VENDORED is published"
+
+  self-test:
+    # The suite's own end-to-end check: run it against a real third-party MCP
+    # server. That server predates 2026-07-28, so a conformance failure is the
+    # expected outcome — what is being verified is that the suite *runs*, reaches
+    # a verdict, and reports rather than hangs or crashes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: report against a real MCP server
+        run: |
+          set -o pipefail
+          node bin/mcp-spec-test.mjs \
+            -c "npx -y @modelcontextprotocol/server-everything" \
+            --stream-budget-ms 1500 | tee report.txt || true
+          grep -q "conformance report" report.txt
+          grep -q "Verdict:" report.txt
