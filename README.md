@@ -49,68 +49,41 @@ Verdict: not conformant — 2 requirements violated.
 
 Exit code is 0 when nothing failed.
 
-### "Couldn't check" and "nothing to check" are different sections
+### Requirements this revision does not have are not reported
 
-A case that does not run means one of two things, and putting them in one list
-makes both useless:
+A case that does not run means one of two things, and only one of them is worth a
+reader's attention:
 
 - **NOT VERIFIED** — the requirement applies to this target, but the run could not
   establish it: a capability was not advertised, a call needed arguments the suite
   will not invent, a stream never opened. This is the list to work through before
   claiming conformance, which is why it is printed above the passes.
-- **NOT APPLICABLE** — the revision under test does not define the thing, or the
-  transport has no such requirement. Testing `initialize` against `2026-07-28`
-  is not a gap in the run; that revision replaced the handshake with
-  `server/discover`. These are collapsed to a line per reason and counted apart,
-  because there is nothing to act on.
+- **Not applicable** — the revision under test does not define the thing, or the
+  transport has no such requirement. `initialize` is not a gap in a `2026-07-28`
+  run; that revision replaced the handshake with `server/discover`. These are
+  **omitted entirely** — not listed, not counted. A requirement the spec does not
+  define is not a result, and showing it only invites the question of why the
+  suite is testing something the spec does not have.
 
-So a clean run against a server on an older revision says so plainly instead of
-burying it:
+So the totals describe what actually applied, and a clean run against a server on
+an older revision reads as a plain answer:
 
 ```
-NOT APPLICABLE (23) — this revision or transport does not define these; nothing to check
-
-  server/discover
-    6 cases — 2025-11-25 has no server/discover; it negotiates at the handshake instead
-  Result envelope
-    2 cases — 2025-11-25 does not define resultEnvelope
+PASSED (20)
+  ...
 
 Summary
-  20 passed  0 failed  0 not verified  23 not applicable
+  20 passed  0 failed  0 not verified
+  20 cases applied, in 292ms
 
 Verdict: conformant to 2025-11-25 — every requirement that applies to this
 revision and transport was checked and passed.
 ```
 
-Neither kind fails the run. The verdict is drawn from failures and unverified
-cases only: a requirement that cannot exist for this target is not a caveat on
-the result.
-
-### MUST and SHOULD are reported separately
-
-The spec uses both, and conflating them makes a tool untrustworthy in both
-directions. *"Invalid cursors SHOULD result in an error with code -32602"* is a
-recommendation; a server that ignores it is doing something worth knowing about,
-but it is not non-conformant, and saying so alongside a violated MUST cheapens
-every real finding.
-
-So recommendations get their own section and stay out of the verdict and the exit
-code:
-
-```
-RECOMMENDED, NOT MET (1) — the spec says SHOULD here, so this is not a conformance failure
-
-  Capability methods
-    ! an unrecognised cursor is answered rather than rejected
-        the spec recommends -32602 for an invalid cursor; got a result instead: {"tools":[...
-
-Summary
-  20 passed  0 failed  23 not verified  1 recommended not met
-```
-
-That output is from a real run against `@modelcontextprotocol/server-everything`,
-which returns page one for a cursor it never issued. Worth reporting; not a
-failure.
+The same suite reports 36 applied cases against a `2026-07-28` server. The
+difference is not something withheld; those revisions have different
+requirements. Which cases belong to which is listed in full under
+[Every case](#every-case-one-by-one), so the numbers are always explainable.
 
 ## Supported revisions
 
@@ -157,12 +130,27 @@ revision is reported, not passed over.
 Point the suite at a server and it asks what revisions that server offers, then
 tests the newest one inside its window. A server on `2025-11-25` gets a
 `2025-11-25` verdict; you do not have to know which revision it speaks before you
-can test it.
+can test it. The report says where the answer came from:
 
 ```
 $ npx @hasmcp/mcp-spec-test@latest -u "https://example.com/mcp?token=..."
-testing 2025-11-25 — the newest supported revision this server offers
+testing 2025-11-25 — the newest supported revision this server offers, per the handshake
 ```
+
+`server/discover` is asked first, since it lists every servable revision. A server
+that answers it with an error predates it, and the handshake is asked instead. But
+a target that cannot be reached — rate-limited, or a transport failure — resolves
+to neither, and the run says so rather than guessing:
+
+```
+could not establish which revisions this server offers; testing the newest
+supported one — pass --spec-version to be explicit
+```
+
+That distinction is load-bearing. The handshake reports one negotiated version,
+usually an older one, so treating a throttled discover as "no discover" would
+quietly test a different revision than the server offers and publish a confident
+verdict for it.
 
 This matters because the capability cases assert against the schema of the
 revision under test, and those requirements differ — `ListToolsResult` requires
@@ -199,8 +187,8 @@ quietly mean that many requests per file.
 
 ## Every case, one by one
 
-43 cases. Which ones run against a given server is decided by three independent
-gates, and each case below states its own:
+43 cases in total, of which a given run reports only those that apply to the
+target. Three independent gates decide that, and each case below states its own:
 
 1. *Revision* — derived from the vendored schema. `server/discover` cases cannot
    run against a revision whose schema has no `DiscoverRequest`.
@@ -210,8 +198,9 @@ gates, and each case below states its own:
    response headers). They skip on stdio because they are absent there, not
    because they were met.
 
-A case that runs nowhere is worth knowing about, which is why every skip prints
-its reason and the summary counts them apart from the passes.
+Cases ruled out by the revision or the transport are omitted from the report
+rather than listed — see above. Cases that applied but could not be checked are
+always printed, with the reason.
 
 ### server/discover — 2026-07-28 only
 

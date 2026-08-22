@@ -191,12 +191,13 @@ async function detectRevision() {
   try {
     const { SUPPORTED_REVISIONS } = await import(`file://${join(root, 'lib', 'env.mjs')}`)
     const { transport, shutdown } = await import(`file://${join(root, 'lib', 'transport.mjs')}`)
+    const { throttled } = await import(`file://${join(root, 'lib', 'rpc.mjs')}`)
     try {
-      const offered = await askServer(transport, SUPPORTED_REVISIONS)
-      if (!offered.length) return null
+      const { versions, via } = await askServer(transport, SUPPORTED_REVISIONS, throttled)
+      if (!versions.length) return null
       // Revision ids are ISO dates, so the newest supported one sorts last.
-      const pick = offered.filter((v) => SUPPORTED_REVISIONS.includes(v)).sort().at(-1)
-      return pick ?? null
+      const pick = versions.filter((v) => SUPPORTED_REVISIONS.includes(v)).sort().at(-1)
+      return pick ? { revision: pick, via } : null
     } finally {
       shutdown()
     }
@@ -210,15 +211,27 @@ async function detectRevision() {
   }
 }
 
-// askServer tries server/discover, which lists every servable revision, then
-// falls back to initialize, which reports the one it negotiated.
-async function askServer(transport, revisions) {
+// askServer asks server/discover, which lists every servable revision, and falls
+// back to initialize only when discover is genuinely absent.
+//
+// The line that matters is between "the server answered and cannot serve
+// discover" and "we could not ask it". The first is a fact to act on: try the
+// handshake, which is how a server without discover reports its version. The
+// second is not — a rate limit or a transport blip used to fall through to the
+// handshake, which reports a single, older negotiated version, and the run would
+// then test that revision and publish a confident verdict for it. Testing
+// something other than what the server offers is worse than detecting nothing.
+async function askServer(transport, revisions, throttled) {
   const discover = await transport.send(
     { jsonrpc: '2.0', id: 'preflight-discover', method: 'server/discover' },
     { headers: {} },
   )
+
   const listed = discover.body?.result?.supportedVersions
-  if (Array.isArray(listed) && listed.length) return listed
+  if (Array.isArray(listed) && listed.length) return { versions: listed, via: 'server/discover' }
+
+  // No answer, or an answer that only says "not right now": nothing was learned.
+  if (throttled(discover) || !discover.body?.error) return { versions: [], via: null }
 
   const init = await transport.send({
     jsonrpc: '2.0',
@@ -231,14 +244,24 @@ async function askServer(transport, revisions) {
     },
   }, { headers: {} })
   const negotiated = init.body?.result?.protocolVersion
-  return negotiated ? [negotiated] : []
+  return negotiated ? { versions: [negotiated], via: 'the handshake' } : { versions: [], via: null }
 }
 
 if (!env.MCP_SPEC_VERSION) {
   const detected = await detectRevision()
   if (detected) {
-    env.MCP_SPEC_VERSION = detected
-    process.stderr.write(`testing ${detected} — the newest supported revision this server offers\n`)
+    env.MCP_SPEC_VERSION = detected.revision
+    process.stderr.write(
+      `testing ${detected.revision} — the newest supported revision this server offers, per ${detected.via}\n`,
+    )
+  } else {
+    // Saying so matters: the run continues against the newest vendored revision,
+    // and a reader has to know the choice was a default rather than the server's
+    // answer.
+    process.stderr.write(
+      'could not establish which revisions this server offers; '
+      + 'testing the newest supported one — pass --spec-version to be explicit\n',
+    )
   }
 }
 
