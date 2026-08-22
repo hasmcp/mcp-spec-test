@@ -256,15 +256,22 @@ async function maybeAuthenticate() {
   if (probe.status !== 401) return // not an authenticated endpoint, or already open
 
   process.stderr.write('endpoint returned 401; discovering OAuth configuration\n')
-  const result = await oauth.obtainToken({
-    mcpUrl: env.MCP_URL,
-    clientId: env.MCP_CLIENT_ID,
-    clientSecret: env.MCP_CLIENT_SECRET,
-    scope: env.MCP_SCOPE,
-    allowRegistration: env.MCP_NO_REGISTER !== '1',
-    challenge: probe.challenge,
-    log: (line) => process.stderr.write(`  ${line}\n`),
-  })
+  let result
+  try {
+    result = await oauth.obtainToken({
+      mcpUrl: env.MCP_URL,
+      clientId: env.MCP_CLIENT_ID,
+      clientSecret: env.MCP_CLIENT_SECRET,
+      scope: env.MCP_SCOPE,
+      allowRegistration: env.MCP_NO_REGISTER !== '1',
+      challenge: probe.challenge,
+      log: (line) => process.stderr.write(`  ${line}\n`),
+    })
+  } catch (err) {
+    // Belt and braces: a failure to authenticate must not become a crash, since
+    // the run can still proceed and report every case as unverified.
+    result = { ok: false, reason: err?.message || String(err) }
+  }
 
   if (!result.ok) {
     // Not fatal: the run continues and every case reports itself unverified with

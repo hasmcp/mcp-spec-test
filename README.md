@@ -642,6 +642,33 @@ What it implements, and why each part matters:
   `issuer` must share its origin — so the anti-spoofing property survives the
   tolerance.
 
+#### Which specifications this follows
+
+| document | what is implemented |
+| --- | --- |
+| [RFC 9728](https://www.rfc-editor.org/info/rfc9728) Protected Resource Metadata | both discovery entry points; `authorization_servers`, plus tolerance for the singular and metadata-URL forms with a note |
+| [RFC 8414](https://www.rfc-editor.org/info/rfc8414) Authorization Server Metadata | well-known URI inserted between host and path (§3), the `openid-configuration` fallbacks (§5), and the §3.3 issuer-identity check |
+| [RFC 7591](https://www.rfc-editor.org/info/rfc7591) Dynamic Client Registration | JSON POST to `registration_endpoint` (§3.1), `client_id` required in the response (§3.2.1), `error`/`error_description` reported (§3.2.2) |
+| [RFC 8707](https://www.rfc-editor.org/info/rfc8707) Resource Indicators | the `resource` parameter on the token request, from the canonical MCP server URI |
+| [RFC 6749](https://www.rfc-editor.org/info/rfc6749) §4.4 | the `client_credentials` grant |
+
+Two details that matter in practice:
+
+- **The registered auth method is the one used.** RFC 7591 makes
+  `token_endpoint_auth_method` a statement about what the client *will* do, so
+  registering `client_secret_post` and then sending HTTP Basic is a contradiction
+  an authorization server may reject. One function picks the method from
+  `token_endpoint_auth_methods_supported`, and both registration and the token
+  request go through it. If the server registers a different method than the one
+  asked for, its answer wins.
+- **`response_types: []` is deliberate.** RFC 7591 defaults an omitted
+  `response_types` to `["code"]`, which would declare a client that visits the
+  authorization endpoint. This one never does.
+
+RFC 8414 §3 requires the metadata path to use `https`. Loopback targets are
+treated as fixtures; any other non-https endpoint gets a warning, because the
+token being negotiated would cross the network in clear text.
+
 **The token is never stored.** It is obtained, held in memory, and passed to the
 test processes; nothing in the package writes to the filesystem, and no token,
 secret or client secret is ever printed. Each run negotiates its own.
