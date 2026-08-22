@@ -46,6 +46,9 @@ const FLAGS = {
   '--page-limit': 'MCP_PAGE_LIMIT',
   '--rate-limit': 'MCP_RATE_LIMIT',
   '--retry-budget-ms': 'MCP_RETRY_BUDGET_MS',
+  '--client-id': 'MCP_CLIENT_ID',
+  '--client-secret': 'MCP_CLIENT_SECRET',
+  '--scope': 'MCP_SCOPE',
 }
 
 const USAGE = `
@@ -70,6 +73,18 @@ Credentials
       --auth-query-param <k>   query parameter in query mode (default token)
                                                                    [MCP_AUTH_QUERY_PARAM]
   -H, --header <list>          extra headers, "k: v, k2: v2"       [MCP_EXTRA_HEADERS]
+
+OAuth 2.1, when the endpoint requires it
+      --client-id <id>         OAuth client id                     [MCP_CLIENT_ID]
+      --client-secret <secret> OAuth client secret             [MCP_CLIENT_SECRET]
+      --scope <scope>          scope to request                        [MCP_SCOPE]
+      --no-register            do not register a client dynamically, even if the
+                               authorization server offers it   [MCP_NO_REGISTER]
+
+  With no --token, an endpoint that answers 401 is discovered per the spec:
+  WWW-Authenticate, then protected-resource metadata, then the authorization
+  server. Client credentials are used if given; otherwise a client is registered
+  dynamically when the server supports it. Every step is printed.
 
 Suite
       --spec-version <date>    revision to test; one of the supported window
@@ -134,6 +149,10 @@ for (let i = 0; i < argv.length; i++) {
   if (arg === '-v' || arg === '--version') {
     process.stdout.write(`${pkg.version}\n`)
     process.exit(0)
+  }
+  if (arg === '--no-register') {
+    env.MCP_NO_REGISTER = '1'
+    continue
   }
   if (arg === '--verbose') {
     env.MCP_VERBOSE = '1'
@@ -201,6 +220,47 @@ if (env.MCP_URL && env.MCP_COMMAND) {
   process.stderr.write('pass either a url or a command, not both — they select different transports\n')
   process.exit(2)
 }
+
+// Obtain a bearer token when the endpoint wants one and none was supplied.
+//
+// Done here rather than in the tests for the same reason as revision detection:
+// it happens once, and the test processes stay concerned with the protocol rather
+// than with how a credential was acquired.
+async function maybeAuthenticate() {
+  if (env.MCP_TOKEN || env.MCP_COMMAND || !env.MCP_URL) return
+
+  const oauth = await import(`file://${join(root, 'lib', 'oauth.mjs')}`)
+
+  const probe = await oauth.probeChallenge(env.MCP_URL)
+  if (probe.status !== 401) return // not an authenticated endpoint, or already open
+
+  process.stderr.write('endpoint returned 401; discovering OAuth configuration\n')
+  const result = await oauth.obtainToken({
+    mcpUrl: env.MCP_URL,
+    clientId: env.MCP_CLIENT_ID,
+    clientSecret: env.MCP_CLIENT_SECRET,
+    scope: env.MCP_SCOPE,
+    allowRegistration: env.MCP_NO_REGISTER !== '1',
+    challenge: probe.challenge,
+    log: (line) => process.stderr.write(`  ${line}\n`),
+  })
+
+  if (!result.ok) {
+    // Not fatal: the run continues and every case reports itself unverified with
+    // the endpoint's own rejection, which is more informative than this tool
+    // deciding the run is over.
+    process.stderr.write(`could not authenticate: ${result.reason}\n`)
+    return
+  }
+  env.MCP_TOKEN = result.accessToken
+  // A token from this flow is a standard OAuth bearer, whatever the endpoint's
+  // other credential conventions are.
+  env.MCP_AUTH_MODE = 'header'
+  env.MCP_AUTH_HEADER = 'authorization'
+  env.MCP_AUTH_SCHEME = 'Bearer'
+}
+
+await maybeAuthenticate()
 
 // Pick the revision to test from what the server actually serves.
 //

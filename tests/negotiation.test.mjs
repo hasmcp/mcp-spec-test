@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 
 import { requireTarget, requireHttp, LATEST_SPEC_VERSION } from '../lib/env.mjs'
 import { probe, requireLatest, requireOlderVersion } from '../lib/probe.mjs'
-import { call, requireNotThrottled, result, rpcError } from '../lib/rpc.mjs'
+import { call, requireReachable, result, rpcError } from '../lib/rpc.mjs'
 import { ERROR_CODES, FEATURES, methodConst, missingRequired, requireFeature } from '../lib/schema.mjs'
 import * as session from '../lib/session.mjs'
 
@@ -134,7 +134,7 @@ test('a request with no version at all is served on the default', async (t) => {
   const { ok: discoverAnswered } = await probe()
   const method = FEATURES.discover && discoverAnswered ? DISCOVER : await negotiationMethod()
   const res = await call(method, { version: null, meta: false, headerVersion: null })
-  if (!requireNotThrottled(t, res, method)) return
+  if (!requireReachable(t, res, method)) return
   assert.equal(
     res.status,
     200,

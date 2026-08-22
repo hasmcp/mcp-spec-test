@@ -557,6 +557,75 @@ it. The `@` form works through the environment variables too
 (`MCP_TOOL_ARGS=@/etc/mcp/tool-args.json`), which keeps a large argument set out
 of a CI command line.
 
+### OAuth 2.1
+
+An endpoint that answers `401` is handled without being told to. The suite walks
+the discovery chain the spec defines, uses client credentials if you have them,
+and registers a client dynamically if you do not:
+
+```bash
+# nothing but the URL — a client is registered dynamically
+npx @hasmcp/mcp-spec-test@latest -u https://mcp.example.com/mcp
+
+# with credentials you already hold
+npx @hasmcp/mcp-spec-test@latest -u https://mcp.example.com/mcp \
+  --client-id "$CLIENT_ID" --client-secret "$CLIENT_SECRET" --scope mcp:read
+```
+
+Every step is printed, because registering a client creates state on somebody
+else's authorization server and that should never happen quietly:
+
+```
+endpoint returned 401; discovering OAuth configuration
+  found protected-resource metadata at https://mcp.example.com/.well-known/oauth-protected-resource/mcp
+  found authorization server metadata at https://auth.example.com/.well-known/oauth-authorization-server
+  no client credentials given; registering a client with https://auth.example.com/register
+  registered client_id dcr-1
+  obtained an access token for resource https://mcp.example.com/mcp
+```
+
+| flag | env | meaning |
+| --- | --- | --- |
+| `--client-id` | `MCP_CLIENT_ID` | OAuth client id |
+| `--client-secret` | `MCP_CLIENT_SECRET` | OAuth client secret |
+| `--scope` | `MCP_SCOPE` | scope to request |
+| `--no-register` | `MCP_NO_REGISTER` | never register dynamically, even where offered |
+
+What it implements, and why each part matters:
+
+- **Both discovery entry points.** `resource_metadata` from the `WWW-Authenticate`
+  header takes precedence; without it, the well-known URIs are tried in the
+  specified order — path-scoped first, then root. Endpoints do it both ways.
+- **Resource Indicators** (RFC 8707). The token request carries
+  `resource=<canonical MCP server URI>`, so the token is bound to this server as
+  its audience. Query and fragment are stripped: credentials often ride in the
+  query string, and a token audience must not be keyed to a secret.
+- **The issuer check.** Authorization server metadata is refused unless its
+  `issuer` matches the issuer used to construct the URL. Skipping it is how a
+  client is talked into sending credentials to an attacker, and the spec names
+  that attack explicitly. A mismatch is reported, not worked around:
+  ```
+  refused: declares issuer "https://somewhere-else.example", expected "https://auth.example.com"
+  ```
+- **Dynamic Client Registration** as the fallback the spec prescribes, with
+  `application_type: "native"` — a conformance runner is not a browser and has no
+  redirect to come back to.
+
+**One limit worth stating.** The runner uses the `client_credentials` grant,
+because it has no browser and no user. An authorization server offering only
+`authorization_code` cannot issue it a token, and no amount of code changes that.
+It says so rather than failing obscurely:
+
+```
+advertises grant_types_supported ["authorization_code"] — no client_credentials,
+so a runner with no browser cannot obtain a token. Pass one with --token.
+```
+
+A refused credential is treated like a rate limit, not like a finding: cases
+report themselves **not verified** with the endpoint's own rejection. An
+unauthenticated run proves nothing about conformance, so it must not read as
+thirty-six violations.
+
 ### In CI
 
 ```yaml
@@ -637,6 +706,7 @@ the environment the tests read and runs them under the reporter in
 | `lib/probe.mjs` | capability discovery, and the guards tests skip on |
 | `lib/session.mjs` | the `initialize` handshake, for revisions that have one |
 | `lib/level.mjs` | the MUST/SHOULD distinction |
+| `lib/oauth.mjs` | OAuth discovery, dynamic registration, tokens |
 | `lib/reporter.mjs` | the conformance report |
 | `spec/<revision>/schema.json` | the vendored published schemas; the newest is the revision under test |
 

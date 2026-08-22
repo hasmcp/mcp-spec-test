@@ -36,17 +36,18 @@ import {
 } from '../lib/env.mjs'
 import { skipNotApplicable } from '../lib/level.mjs'
 import { probe } from '../lib/probe.mjs'
-import { call, requireNotThrottled, rpcError, throttled } from '../lib/rpc.mjs'
+import { call, requireReachable, rpcError, throttled } from '../lib/rpc.mjs'
 import { tokenize } from '../lib/transport.mjs'
 
 // connect builds the SDK's own transport for whichever target is configured. In
 // header mode a non-standard auth header has to be threaded through requestInit,
 // because the SDK sends `Authorization` and offers no way to rename it.
-// The SDK drives its own transport, so a rate limit surfaces here as an opaque
-// transport error rather than a response this suite can inspect. It is still not
-// a conformance answer, so it is recognised and skipped rather than failed.
-function isThrottleError(err) {
-  return /\b429\b|rate.?limit/i.test(String(err?.message ?? err))
+// The SDK drives its own transport, so a rate limit or a refused credential
+// surfaces here as an opaque transport error rather than a response this suite can
+// inspect. Neither is a conformance answer, so both are recognised and skipped
+// rather than failed.
+function isUnreachableError(err) {
+  return /\b(429|401|403)\b|rate.?limit|unauthor|invalid_token/i.test(String(err?.message ?? err))
 }
 
 // connectOrSkip returns null when the target was throttling, having skipped the
@@ -55,8 +56,8 @@ async function connectOrSkip(t, name) {
   try {
     return await connect(name)
   } catch (err) {
-    if (isThrottleError(err)) {
-      t.skip(`target rate-limited the SDK client — raise the limit or re-run later (${err.message})`)
+    if (isUnreachableError(err)) {
+      t.skip(`target would not serve the SDK client — rate limit or credentials (${err.message})`)
       return null
     }
     throw err
@@ -144,7 +145,7 @@ test('the handshake settles on a revision inside the supported window', async (t
       clientInfo: { name: 'mcp-spec-test', version: '1.0.0' },
     },
   })
-  if (!requireNotThrottled(t, res, 'initialize')) return
+  if (!requireReachable(t, res, 'initialize')) return
   if (rpcError(res)) return t.skip(`target does not answer initialize: ${JSON.stringify(rpcError(res))}`)
 
   const negotiated = res.body?.result?.protocolVersion
@@ -171,7 +172,7 @@ test('a stock official-SDK client can list tools', async (t) => {
     try {
       ;({ tools } = await client.listTools())
     } catch (err) {
-      if (isThrottleError(err)) return t.skip(`target rate-limited the SDK client (${err.message})`)
+      if (isUnreachableError(err)) return t.skip(`target would not serve the SDK client (${err.message})`)
       throw err
     }
     assert.ok(Array.isArray(tools), 'tools/list must return an array')
@@ -210,7 +211,7 @@ test('a completely unconfigured SDK client works', async (t) => {
   try {
     await client.connect(new StreamableHTTPClientTransport(url))
   } catch (err) {
-    if (isThrottleError(err)) return t.skip(`target rate-limited the SDK client (${err.message})`)
+    if (isUnreachableError(err)) return t.skip(`target rate-limited the SDK client (${err.message})`)
     throw err
   }
   try {
