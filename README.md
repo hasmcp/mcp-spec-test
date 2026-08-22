@@ -118,6 +118,51 @@ against assumptions the suite cannot back with a schema. The handshake is checke
 against the window too: a server that answers a stock client with an ancient
 revision is reported, not passed over.
 
+## The revision is chosen from what the server serves
+
+Point the suite at a server and it asks what revisions that server offers, then
+tests the newest one inside its window. A server on `2025-11-25` gets a
+`2025-11-25` verdict; you do not have to know which revision it speaks before you
+can test it.
+
+```
+$ npx @hasmcp/mcp-spec-test@latest -u "https://example.com/mcp?token=..."
+testing 2025-11-25 — the newest supported revision this server offers
+```
+
+This matters because the capability cases assert against the schema of the
+revision under test, and those requirements differ — `ListToolsResult` requires
+`resultType`, `ttlMs` and `cacheScope` in `2026-07-28` and only `tools` before
+it. Running them against a server on another revision would fail it for not
+implementing something it never claimed, so they skip instead. Correct, but
+"28 not verified" is a useless answer to "is my server conformant", which is what
+the auto-selection fixes.
+
+An explicit `--spec-version` always wins. *"Check my server against
+2026-07-28"* is a legitimate question, and the answer to it must not silently
+become the answer to a different one.
+
+## Rate limits are waited out, not reported as failures
+
+A `429` says nothing about conformance, so the suite neither fails the case nor
+hammers the target. It opens a breaker — every request holds off — waits for the
+interval the target asked for in `Retry-After`, or backs off from a second, and
+carries on when the limit clears. `--retry-budget-ms` bounds the total wait
+(default 60s); past that the case reports itself as **not verified**, naming the
+rate limit, because that is what happened.
+
+For a target whose limit a full pass would exceed anyway, pace the run instead:
+
+```bash
+# the server allows 60 requests per 60s
+npx @hasmcp/mcp-spec-test@latest -u "$URL" --rate-limit 60
+```
+
+`--rate-limit` is in requests per minute so the number can be copied straight
+from the server's configuration. It also runs the test files one at a time —
+node:test gives each file its own process, so without that the limit would
+quietly mean that many requests per file.
+
 ## Every case, one by one
 
 43 cases. Which ones run against a given server is decided by three independent
@@ -418,6 +463,8 @@ MCP_URL=https://mcp.example.com/mcp MCP_TOKEN="$TOKEN" npx @hasmcp/mcp-spec-test
 | `--prompt-args` | `MCP_PROMPT_ARGS` | arguments per prompt, same shape |
 | `--resource-sample` | `MCP_RESOURCE_SAMPLE` | how many listed resources to read (default 5) |
 | `--page-limit` | `MCP_PAGE_LIMIT` | pages to follow before calling pagination broken (default 10) |
+| `--rate-limit` | `MCP_RATE_LIMIT` | pace requests to at most n per minute |
+| — | `MCP_RETRY_BUDGET_MS` | how long to wait out a rate limit (default 60000; 0 disables) |
 | `--verbose` | `MCP_VERBOSE` | also print the target's own stderr |
 | `--only <pattern>` | — | run only test files matching a substring |
 | `--tap` | — | raw TAP instead of the report, for CI parsing |

@@ -44,6 +44,8 @@ const FLAGS = {
   '--prompt-args': 'MCP_PROMPT_ARGS',
   '--resource-sample': 'MCP_RESOURCE_SAMPLE',
   '--page-limit': 'MCP_PAGE_LIMIT',
+  '--rate-limit': 'MCP_RATE_LIMIT',
+  '--retry-budget-ms': 'MCP_RETRY_BUDGET_MS',
 }
 
 const USAGE = `
@@ -79,6 +81,15 @@ Suite
                                                                    [MCP_SERVER_DEFAULT_VERSION]
       --stream-budget-ms <ms>  how long streaming cases wait (default 4000)
                                                                    [MCP_STREAM_BUDGET_MS]
+      --rate-limit <n>         pace requests to at most n per minute, for targets
+                               that rate-limit. Copy the number from the server's
+                               own limit (e.g. 60 for 60-per-60s). Also runs the
+                               test files one at a time, since otherwise each
+                               would pace itself independently
+                                                                   [MCP_RATE_LIMIT]
+      --retry-budget-ms <ms>   how long to wait out a rate limit before reporting
+                               the case unverified (default 60000, 0 disables)
+                                                                   [MCP_RETRY_BUDGET_MS]
 
 Opting in to calls the suite will not guess at
       --tool-args <json>       arguments per tool, '{"search":{"query":"x"}}'.
@@ -160,8 +171,84 @@ if (env.MCP_URL && env.MCP_COMMAND) {
   process.exit(2)
 }
 
+// Pick the revision to test from what the server actually serves.
+//
+// Without this, pointing the tool at a server that speaks an older revision
+// reports almost nothing: the capability cases assert against the schema of the
+// revision under test, and those requirements differ — ListToolsResult requires
+// resultType/ttlMs/cacheScope in 2026-07-28 and only `tools` before it — so
+// running them against a server on another revision would fail it for not
+// implementing something it never claimed. Skipping is right, but "28 not
+// verified" is a useless answer to "is my server conformant".
+//
+// So the server is asked first, and the newest revision it offers that this
+// suite supports is the one tested. An explicit --spec-version always wins:
+// "check my server against 2026-07-28" is a legitimate question, and the answer
+// to it should not silently become a different question.
+async function detectRevision() {
+  const previous = { ...process.env }
+  Object.assign(process.env, env)
+  try {
+    const { SUPPORTED_REVISIONS } = await import(`file://${join(root, 'lib', 'env.mjs')}`)
+    const { transport, shutdown } = await import(`file://${join(root, 'lib', 'transport.mjs')}`)
+    try {
+      const offered = await askServer(transport, SUPPORTED_REVISIONS)
+      if (!offered.length) return null
+      // Revision ids are ISO dates, so the newest supported one sorts last.
+      const pick = offered.filter((v) => SUPPORTED_REVISIONS.includes(v)).sort().at(-1)
+      return pick ?? null
+    } finally {
+      shutdown()
+    }
+  } catch {
+    // An unreachable or unusual target is the test run's problem to report, not
+    // the pre-flight's. Fall through to the default revision.
+    return null
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key]
+    Object.assign(process.env, previous)
+  }
+}
+
+// askServer tries server/discover, which lists every servable revision, then
+// falls back to initialize, which reports the one it negotiated.
+async function askServer(transport, revisions) {
+  const discover = await transport.send(
+    { jsonrpc: '2.0', id: 'preflight-discover', method: 'server/discover' },
+    { headers: {} },
+  )
+  const listed = discover.body?.result?.supportedVersions
+  if (Array.isArray(listed) && listed.length) return listed
+
+  const init = await transport.send({
+    jsonrpc: '2.0',
+    id: 'preflight-initialize',
+    method: 'initialize',
+    params: {
+      protocolVersion: revisions.at(-1),
+      capabilities: {},
+      clientInfo: { name: 'mcp-spec-test', version: pkg.version },
+    },
+  }, { headers: {} })
+  const negotiated = init.body?.result?.protocolVersion
+  return negotiated ? [negotiated] : []
+}
+
+if (!env.MCP_SPEC_VERSION) {
+  const detected = await detectRevision()
+  if (detected) {
+    env.MCP_SPEC_VERSION = detected
+    process.stderr.write(`testing ${detected} — the newest supported revision this server offers\n`)
+  }
+}
+
 const pattern = only ? `tests/**/*${only}*.test.mjs` : 'tests/**/*.test.mjs'
 const args = ['--test']
+
+// Pacing is per process and node:test gives each file its own, so a limit only
+// holds if the files run one at a time. Without this, the requests-per-minute
+// number would silently mean that many per file.
+if (Number(env.MCP_RATE_LIMIT) > 0) args.push('--test-concurrency=1')
 args.push(tap ? '--test-reporter=tap' : `--test-reporter=${join(root, 'lib', 'reporter.mjs')}`)
 args.push(pattern)
 

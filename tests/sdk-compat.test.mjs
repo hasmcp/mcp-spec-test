@@ -35,12 +35,33 @@ import {
   targetURL,
 } from '../lib/env.mjs'
 import { probe } from '../lib/probe.mjs'
-import { call, rpcError } from '../lib/rpc.mjs'
+import { call, requireNotThrottled, rpcError, throttled } from '../lib/rpc.mjs'
 import { tokenize } from '../lib/transport.mjs'
 
 // connect builds the SDK's own transport for whichever target is configured. In
 // header mode a non-standard auth header has to be threaded through requestInit,
 // because the SDK sends `Authorization` and offers no way to rename it.
+// The SDK drives its own transport, so a rate limit surfaces here as an opaque
+// transport error rather than a response this suite can inspect. It is still not
+// a conformance answer, so it is recognised and skipped rather than failed.
+function isThrottleError(err) {
+  return /\b429\b|rate.?limit/i.test(String(err?.message ?? err))
+}
+
+// connectOrSkip returns null when the target was throttling, having skipped the
+// case with that reason.
+async function connectOrSkip(t, name) {
+  try {
+    return await connect(name)
+  } catch (err) {
+    if (isThrottleError(err)) {
+      t.skip(`target rate-limited the SDK client — raise the limit or re-run later (${err.message})`)
+      return null
+    }
+    throw err
+  }
+}
+
 async function connect(name = 'mcp-spec-test') {
   let transport
   if (TRANSPORT === 'stdio') {
@@ -88,7 +109,8 @@ test('a stock official-SDK client completes the handshake', async (t) => {
     return t.skip(`target serves only ${JSON.stringify(p.supportedVersions)}, none of which this SDK speaks`)
   }
 
-  const client = await connect()
+  const client = await connectOrSkip(t)
+  if (!client) return
   try {
     const info = client.getServerVersion()
     assert.ok(info?.name, `expected serverInfo from initialize, got ${JSON.stringify(info)}`)
@@ -121,6 +143,7 @@ test('the handshake settles on a revision inside the supported window', async (t
       clientInfo: { name: 'mcp-spec-test', version: '1.0.0' },
     },
   })
+  if (!requireNotThrottled(t, res, 'initialize')) return
   if (rpcError(res)) return t.skip(`target does not answer initialize: ${JSON.stringify(rpcError(res))}`)
 
   const negotiated = res.body?.result?.protocolVersion
@@ -137,12 +160,19 @@ test('a stock official-SDK client can list tools', async (t) => {
   const p = await probe()
   if (p.ok && !p.capabilities?.tools) return t.skip('target advertises no tools capability')
 
-  const client = await connect()
+  const client = await connectOrSkip(t)
+  if (!client) return
   try {
     // listTools() throws if the payload fails the SDK's own zod validation, so a
     // successful round-trip is itself evidence that no field from the newer
     // revision is leaking to a client that negotiated an older one.
-    const { tools } = await client.listTools()
+    let tools
+    try {
+      ;({ tools } = await client.listTools())
+    } catch (err) {
+      if (isThrottleError(err)) return t.skip(`target rate-limited the SDK client (${err.message})`)
+      throw err
+    }
     assert.ok(Array.isArray(tools), 'tools/list must return an array')
     for (const tool of tools) {
       assert.ok(tool.name, 'every tool needs a name')
@@ -168,7 +198,12 @@ test('a completely unconfigured SDK client works', async (t) => {
   if (MCP_TOKEN && MCP_AUTH_MODE === 'query') url.searchParams.set(MCP_AUTH_QUERY_PARAM, MCP_TOKEN)
 
   const client = new Client({ name: 'unmodified-mcp-client', version: '1.0.0' }, { capabilities: {} })
-  await client.connect(new StreamableHTTPClientTransport(url))
+  try {
+    await client.connect(new StreamableHTTPClientTransport(url))
+  } catch (err) {
+    if (isThrottleError(err)) return t.skip(`target rate-limited the SDK client (${err.message})`)
+    throw err
+  }
   try {
     assert.ok(client.getServerVersion()?.name, 'expected serverInfo from initialize')
   } finally {
