@@ -117,10 +117,22 @@ test('an unsupported version is rejected with a 400 on Streamable HTTP', async (
 
 // Backward compatibility: a client that declares nothing must still be served,
 // on whatever version the server defaults to.
+//
+// The method has to be one this server will answer *without a session*, or the
+// case stops testing version fallback and starts testing session policy. A
+// stateful server legitimately refuses tools/list outside a session, and calling
+// that a negotiation failure would be wrong.
+//
+// server/discover is sessionless by definition, so it is used wherever the server
+// actually answers it — which is what the probe already established. Where it does
+// not, the server is either handshake-based (rpc.call has opened the session by
+// now) or does not implement discover at all, and using discover there would just
+// restate a failure the discover cases already report.
 test('a request with no version at all is served on the default', async (t) => {
   if (!requireTarget(t)) return
 
-  const method = await negotiationMethod()
+  const { ok: discoverAnswered } = await probe()
+  const method = FEATURES.discover && discoverAnswered ? DISCOVER : await negotiationMethod()
   const res = await call(method, { version: null, meta: false, headerVersion: null })
   assert.equal(
     res.status,
