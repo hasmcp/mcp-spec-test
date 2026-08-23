@@ -1,6 +1,6 @@
 {
   "name": "@hasmcp/mcp-spec-test",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Black-box conformance suite for any MCP server. Tests the two most recent spec revisions (currently 2026-07-28 and 2025-11-25) against the published schema, plus official-SDK interop.",
   "keywords": [
     "mcp",
@@ -8,7 +8,11 @@
     "conformance",
     "spec",
     "testing",
-    "json-rpc"
+    "json-rpc",
+    "mcp-spec",
+    "mcp-spec-test",
+    "mcp-server",
+    "mcp-testing"
   ],
   "license": "Apache-2.0",
   "author": "HasMCP",
