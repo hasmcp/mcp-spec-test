@@ -492,6 +492,25 @@ MCP_URL=https://mcp.example.com/mcp MCP_TOKEN="$TOKEN" npx @hasmcp/mcp-spec-test
 | `--only <pattern>` | — | run only test files matching a substring |
 | `--tap` | — | raw TAP instead of the report, for CI parsing |
 
+### Docker
+
+The image bundles Node, Python/uv, Go, Rust and Ruby, since a `-c` command that
+launches a real-world MCP server is as likely to be `uvx` or `cargo run` as
+`npx`:
+
+```bash
+docker run --rm <account>/mcp-spec-test -u https://mcp.example.com/mcp -t <token>
+docker run --rm <account>/mcp-spec-test -c "uvx mcp-server-git --repository ."
+```
+
+A stdio target that lives on the host (a local checkout, a Unix socket, a
+repository the command needs to read) has to be reachable inside the
+container too — mount it and point the command at the mounted path:
+
+```bash
+docker run --rm -v "$PWD:/repo" <account>/mcp-spec-test -c "uvx mcp-server-git --repository /repo"
+```
+
 ### Non-standard credentials
 
 The spec expects an OAuth 2.1 bearer token in the standard `Authorization`

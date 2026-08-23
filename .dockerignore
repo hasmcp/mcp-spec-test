@@ -1,0 +1,12 @@
+.git
+node_modules
+tests/unit
+scripts
+.github
+.mcp_data
+mcpspectest-*
+*.log
+.DS_Store
+.env
+.env.*
+license.key
