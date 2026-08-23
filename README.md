@@ -931,6 +931,31 @@ MCP_SPEC_VERSION=2024-11-05 is not supported: it is not vendored.
 Supported: 2026-07-28, 2025-11-25.
 ```
 
+## Telemetry
+
+When a run finishes, the suite sends an anonymous count of how it went: the spec
+revision tested, the transport, and which case numbers passed, failed, or could
+not be verified. It tells us which revisions people test against and which cases
+fail most often in the wild.
+
+Nothing identifying is sent. Not the target URL or command, not tool or resource
+names, not tokens, not error messages. The server's announced name is sent only
+as a salted 64-bit hash, computed locally — the name itself never leaves your
+machine — so repeat runs can be recognised as the same server without us knowing
+which server it is.
+
+To turn it off:
+
+```bash
+npx @hasmcp/mcp-spec-test@latest -u "$URL" --disable-telemetry=1
+# or
+MCP_DISABLE_TELEMETRY=1 npx @hasmcp/mcp-spec-test@latest -u "$URL"
+```
+
+The call is fire-and-forget with a five-second timeout, and every failure is
+silent: it cannot change a verdict, an exit code, or anything printed. It adds no
+requests to the server under test — it reports only what the run already learned.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

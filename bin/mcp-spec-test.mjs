@@ -145,6 +145,8 @@ Opting in to calls the suite will not guess at
       --only <pattern>         run only test files matching a substring
       --verbose                also print the target's own stderr    [MCP_VERBOSE]
       --tap                    raw TAP instead of the report, for CI parsing
+      --disable-telemetry=1    do not send the anonymous usage counts described
+                               in README.md          [MCP_DISABLE_TELEMETRY=1]
   -h, --help                   this message
   -v, --version                print the version
 
@@ -196,6 +198,14 @@ for (let i = 0; i < argv.length; i++) {
   }
   if (arg === '--tap') {
     tap = true
+    continue
+  }
+  // Accepts --disable-telemetry and --disable-telemetry=1 alike. Handled here
+  // rather than in FLAGS because the bare form takes no value, and a FLAGS entry
+  // would eat the next argument.
+  if (arg === '--disable-telemetry' || arg.startsWith('--disable-telemetry=')) {
+    const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : '1'
+    env.MCP_DISABLE_TELEMETRY = value === '0' || value === 'false' ? '0' : '1'
     continue
   }
   if (arg === '--only') {
@@ -374,11 +384,11 @@ async function detectRevision() {
     const { transport, shutdown } = await import(`file://${join(root, 'lib', 'transport.mjs')}`)
     const { throttled } = await import(`file://${join(root, 'lib', 'rpc.mjs')}`)
     try {
-      const { versions, via } = await askServer(transport, SUPPORTED_REVISIONS, throttled)
-      if (!versions.length) return null
+      const { versions, via, name } = await askServer(transport, SUPPORTED_REVISIONS, throttled)
+      if (!versions.length) return name ? { revision: null, via: null, name } : null
       // Revision ids are ISO dates, so the newest supported one sorts last.
       const pick = versions.filter((v) => SUPPORTED_REVISIONS.includes(v)).sort().at(-1)
-      return pick ? { revision: pick, via } : null
+      return pick ? { revision: pick, via, name } : { revision: null, via: null, name }
     } finally {
       shutdown()
     }
@@ -408,11 +418,18 @@ async function askServer(transport, revisions, throttled) {
     { headers: {} },
   )
 
-  const listed = discover.body?.result?.supportedVersions
-  if (Array.isArray(listed) && listed.length) return { versions: listed, via: 'server/discover' }
+  // Picked up in passing, never asked for on its own: telemetry must not add a
+  // request to the target. serverInfo moved into result _meta when the handshake
+  // went away, so both places are checked.
+  const discovered = discover.body?.result
+  const name = discovered?.serverInfo?.name
+    ?? discovered?._meta?.['io.modelcontextprotocol/serverInfo']?.name
+
+  const listed = discovered?.supportedVersions
+  if (Array.isArray(listed) && listed.length) return { versions: listed, via: 'server/discover', name }
 
   // No answer, or an answer that only says "not right now": nothing was learned.
-  if (throttled(discover) || !discover.body?.error) return { versions: [], via: null }
+  if (throttled(discover) || !discover.body?.error) return { versions: [], via: null, name }
 
   const init = await transport.send({
     jsonrpc: '2.0',
@@ -425,12 +442,18 @@ async function askServer(transport, revisions, throttled) {
     },
   }, { headers: {} })
   const negotiated = init.body?.result?.protocolVersion
-  return negotiated ? { versions: [negotiated], via: 'the handshake' } : { versions: [], via: null }
+  const handshakeName = name ?? init.body?.result?.serverInfo?.name
+  return negotiated
+    ? { versions: [negotiated], via: 'the handshake', name: handshakeName }
+    : { versions: [], via: null, name: handshakeName }
 }
 
 if (!env.MCP_SPEC_VERSION) {
   const detected = await detectRevision()
-  if (detected) {
+  // The announced name, if the pre-flight happened to learn one. Hashed in the
+  // reporter, never sent in the clear; see the telemetry section of README.md.
+  if (detected?.name) env.MCP_SERVER_NAME = detected.name
+  if (detected?.revision) {
     env.MCP_SPEC_VERSION = detected.revision
     process.stderr.write(
       `testing ${detected.revision} — the newest supported revision this server offers, per ${detected.via}\n`,
