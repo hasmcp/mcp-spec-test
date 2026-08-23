@@ -14,7 +14,8 @@
 // conformance reporter.
 
 import { spawn } from 'node:child_process'
-import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
+import { accessSync, constants, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
@@ -156,7 +157,7 @@ Opting in to calls the suite will not guess at
       --tap                    raw TAP instead of the report, for CI parsing
       --output <format>        stdio (default, print the report), or md, html or
                                json to write a file                  [MCP_OUTPUT]
-      --output-folder <dir>    where to write it (default: the current directory);
+      --output-folder <dir>    where to write it (default: the OS temp directory);
                                created if missing, and only used with md, html or
                                json                          [MCP_OUTPUT_FOLDER]
       --disable-telemetry=1    do not send the anonymous usage counts described
@@ -175,6 +176,15 @@ are listed as NOT VERIFIED — a skip is not a pass.
 `
 
 const env = { ...process.env }
+// Set by node:test on itself, and inherited from here down to the `node --test`
+// this CLI spawns below to run the suite. node:test's own recursion guard reads
+// it to mean "a test runner is already driving this process" and silently skips
+// running any files — so a run invoked from inside a node:test process (this
+// package's own CI included, which runs the CLI from a test to check its
+// output) would report nothing and still exit 0. The guard is about the parent
+// invocation, not the target we are about to spawn, so it has no business
+// reaching that far.
+delete env.NODE_TEST_CONTEXT
 let only = null
 let tap = false
 const argv = process.argv.slice(2)
@@ -288,10 +298,15 @@ if (tap && env.MCP_OUTPUT && env.MCP_OUTPUT !== 'stdio') {
   process.exit(2)
 }
 
-// Resolved against the shell's directory, not the process's: the tests run with
-// cwd set to the package root, so a relative path would otherwise land inside
-// node_modules — the same reason @file arguments are resolved above.
-env.MCP_OUTPUT_DIR = resolve(process.cwd(), env.MCP_OUTPUT_FOLDER || '.')
+// A report nobody asked to keep defaults to the OS temp directory rather than
+// wherever the command happened to be run from — /tmp (or $TMPDIR) on Linux
+// and macOS, the user's Temp folder on Windows — so a run doesn't litter a
+// project checkout or someone's home directory with timestamped files. An
+// explicit --output-folder is still resolved against the shell's directory,
+// not the process's: the tests run with cwd set to the package root, so a
+// relative path would otherwise land inside node_modules — the same reason
+// @file arguments are resolved above.
+env.MCP_OUTPUT_DIR = env.MCP_OUTPUT_FOLDER ? resolve(process.cwd(), env.MCP_OUTPUT_FOLDER) : tmpdir()
 
 // Checked now rather than when the report is written, because by then the run has
 // already happened: a mistyped folder would cost a full conformance run and then
@@ -529,11 +544,29 @@ if (!env.MCP_SPEC_VERSION) {
   }
 }
 
+// Listed rather than passed as a glob: node --test only gained its own glob
+// support in a later release, and this string would otherwise reach node 20 —
+// the oldest version this package claims to support — as a literal filename to
+// look for, matching nothing. Listing the directory ourselves works on every
+// supported version and needs no shell to expand anything, since spawn() below
+// does not use one.
+//
 // Non-recursive on purpose. tests/ holds the conformance cases and tests/unit/
 // holds this package's own tests, and only the first kind belongs in somebody's
 // conformance report — a user asking "is my server conformant" should not be
 // shown a section proving that our PKCE implementation hashes correctly.
-const pattern = only ? `tests/*${only}*.test.mjs` : 'tests/*.test.mjs'
+const caseFiles = readdirSync(join(root, 'tests'))
+  .filter((name) => name.endsWith('.test.mjs') && (!only || name.includes(only)))
+  .map((name) => join('tests', name))
+
+// Passing node --test zero file arguments does not mean "run nothing" — it
+// falls back to node's own default discovery, which would go looking through
+// the whole package rather than reporting the mistyped pattern it actually is.
+if (only && caseFiles.length === 0) {
+  process.stderr.write(`--only ${only} matched no test file\n`)
+  process.exit(2)
+}
+
 const args = ['--test']
 
 // Pacing is per process and node:test gives each file its own, so a limit only
@@ -541,7 +574,7 @@ const args = ['--test']
 // number would silently mean that many per file.
 if (Number(env.MCP_RATE_LIMIT) > 0) args.push('--test-concurrency=1')
 args.push(tap ? '--test-reporter=tap' : `--test-reporter=${join(root, 'lib', 'reporter.mjs')}`)
-args.push(pattern)
+args.push(...caseFiles)
 
 const child = spawn(process.execPath, args, { cwd: root, env, stdio: 'inherit' })
 child.on('exit', (code, signal) => process.exit(signal ? 1 : code ?? 1))
