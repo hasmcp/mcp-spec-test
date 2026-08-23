@@ -1,19 +1,16 @@
-# Builds the mcp-spec-test image on every push and PR (catching a broken
-# Dockerfile before anyone tries to pull it), and pushes it to Docker Hub on
-# main and on version tags — mirroring publish.yml's approach to npm: the
-# credentials are an explicit secret added when someone is ready, not a
-# requirement for the workflow to stay green.
+# Builds and publishes the mcp-spec-test image only when a change actually
+# lands on main — not on every PR push, which would mean building (and, once
+# credentials exist, pushing) an image for commits nobody has decided belong
+# in the project yet.
 name: docker
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
-  pull_request:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,15 +31,6 @@ jobs:
         run: |
           docker run --rm mcp-spec-test:ci --help > /dev/null
           docker run --rm mcp-spec-test:ci -c "npx -y @modelcontextprotocol/server-everything" --disable-telemetry=1
-
-  publish:
-    needs: build
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
 
       # No credentials is a deliberate state, not a broken build: the
       # repository can sit for a while before anyone wants a release. Skip
@@ -71,24 +59,10 @@ jobs:
 
       # The image lives under whichever Docker Hub account owns the token,
       # since that is the account that will actually receive the push.
-      - name: compute tags
-        if: steps.check.outputs.publish == 'true'
-        id: tags
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: |
-          set -euo pipefail
-          IMAGE="$DOCKERHUB_USERNAME/mcp-spec-test"
-          TAGS="$IMAGE:latest"
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            TAGS="$TAGS,$IMAGE:${GITHUB_REF_NAME#v}"
-          fi
-          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
-
       - name: build and push
         if: steps.check.outputs.publish == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ steps.tags.outputs.tags }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/mcp-spec-test:latest
