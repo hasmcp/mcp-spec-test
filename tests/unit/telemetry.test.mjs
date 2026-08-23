@@ -147,15 +147,27 @@ test('send swallows a rejection from the endpoint', async () => {
 })
 
 test('send gives up rather than hanging', async () => {
-  // A target that never answers must not hold the process open indefinitely.
-  const fetchImpl = (_url, init) =>
-    new Promise((_resolve, reject) => {
-      init.signal.addEventListener('abort', () => reject(new Error('aborted')))
-    })
+  // A target that never answers must not hold the process open indefinitely,
+  // which is exactly what send()'s own AbortSignal.timeout relies on an
+  // unref'd timer to do. That same unref means this test's fake network call
+  // is the only thing left running by the time it starts — so without
+  // something else keeping the event loop open, Node is free to decide the
+  // loop is idle and tear the process down before that timer ever fires,
+  // rather than actually waiting the 20ms out. A ref'd handle here stands in
+  // for "there is other work happening", which is true in every real run.
+  const keepAlive = setInterval(() => {}, 1_000_000)
+  try {
+    const fetchImpl = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(new Error('aborted')))
+      })
 
-  const sent = await send(buildPayload(RUN), { fetchImpl, timeoutMs: 20 })
+    const sent = await send(buildPayload(RUN), { fetchImpl, timeoutMs: 20 })
 
-  assert.equal(sent, false)
+    assert.equal(sent, false)
+  } finally {
+    clearInterval(keepAlive)
+  }
 })
 
 test('send does nothing with nothing to send', async () => {
