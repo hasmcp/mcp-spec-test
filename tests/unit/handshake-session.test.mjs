@@ -103,7 +103,7 @@ test('the handshake is sent outside any session, even once one is open', async (
       params: {
         protocolVersion: '2025-11-25',
         capabilities: {},
-        clientInfo: { name: 'mcp-spec-test', version: '1.0.0' },
+        clientInfo: { name: 'mcp-spec-test', version: '0.1.0' },
       },
     })
 
@@ -132,7 +132,7 @@ test('the handshake is sent outside any session, even once one is open', async (
       params: {
         protocolVersion: '2025-11-25',
         capabilities: {},
-        clientInfo: { name: 'mcp-spec-test', version: '1.0.0' },
+        clientInfo: { name: 'mcp-spec-test', version: '0.1.0' },
       },
     })
     assert.equal(rpcError(duplicate)?.message, 'duplicate "initialize" received')

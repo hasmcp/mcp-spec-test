@@ -81,7 +81,7 @@ async function connect(name = 'mcp-spec-test') {
       requestInit: { headers: { ...authHeaders(), ...extraHeaders() } },
     })
   }
-  const client = new Client({ name, version: '1.0.0' }, { capabilities: {} })
+  const client = new Client({ name, version: '0.1.0' }, { capabilities: {} })
   await client.connect(transport)
   return client
 }
@@ -142,7 +142,7 @@ test('the handshake settles on a revision inside the supported window', async (t
     params: {
       protocolVersion: LATEST_PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: 'mcp-spec-test', version: '1.0.0' },
+      clientInfo: { name: 'mcp-spec-test', version: '0.1.0' },
     },
   })
   if (!requireReachable(t, res, 'initialize')) return
@@ -216,7 +216,7 @@ test('a completely unconfigured SDK client works', async (t) => {
   const url = new URL(targetURL())
   if (MCP_TOKEN && MCP_AUTH_MODE === 'query') url.searchParams.set(MCP_AUTH_QUERY_PARAM, MCP_TOKEN)
 
-  const client = new Client({ name: 'unmodified-mcp-client', version: '1.0.0' }, { capabilities: {} })
+  const client = new Client({ name: 'unmodified-mcp-client', version: '0.1.0' }, { capabilities: {} })
   try {
     await client.connect(new StreamableHTTPClientTransport(url))
   } catch (err) {
