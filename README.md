@@ -846,12 +846,19 @@ By default the report is printed. `--output` writes it to a file instead:
 ```bash
 npx @hasmcp/mcp-spec-test@latest -u "$URL" --output html
 report written to /home/you/mcpspectest-260823071819.html
+
+npx @hasmcp/mcp-spec-test@latest -u "$URL" --output json --output-folder ./reports
+report written to /home/you/reports/mcpspectest-260823072650.json
 ```
 
-Files are named `mcpspectest-<YYMMDDHHMMSS>.<ext>` in the directory you ran from,
-timestamped in UTC to match the `generatedAt` inside. Nothing is overwritten, so
-repeated runs leave a history; `.gitignore` here already covers them, and you may
-want the same line in yours.
+Files are named `mcpspectest-<YYMMDDHHMMSS>.<ext>`, timestamped in UTC to match the
+`generatedAt` inside. Nothing is overwritten, so repeated runs leave a history;
+`.gitignore` here already covers them, and you may want the same line in yours.
+
+`--output-folder` chooses where they land, relative to where you ran from, and the
+folder is created if it does not exist. It is checked *before* the suite runs — a
+mistyped path should not cost a full conformance run and then throw the results
+away. If the write fails anyway, the report is printed rather than lost.
 
 Only the one line naming the file goes to the terminal — the report itself does
 not, so `--output json` leaves stdout free.

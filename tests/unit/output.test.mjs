@@ -118,3 +118,20 @@ test('with no directory given it falls back to the process, rather than throwing
   emit(model, { env: { MCP_OUTPUT: 'md' }, write: (p) => { path = p } })
   assert.equal(path, join(process.cwd(), 'mcpspectest-260823071503.md'))
 })
+
+// The run is the expensive part — minutes of requests, possibly against a
+// rate-limited target. Losing it to a full disk would be the worst outcome here,
+// so a failed write costs the file and not the findings.
+test('a failed write prints the report instead of losing it', () => {
+  const result = emit(model, {
+    env: { MCP_OUTPUT: 'html', MCP_OUTPUT_DIR: '/somewhere' },
+    write: () => { throw new Error('ENOSPC: no space left on device') },
+  })
+
+  assert.equal(result.path, null, 'a path implies a file that does not exist')
+  assert.match(result.stdout, /could not write \/somewhere\/mcpspectest-260823071503\.html/)
+  assert.match(result.stdout, /ENOSPC/)
+  // And the findings themselves, in the one format that needs no file.
+  assert.match(result.stdout, /Verdict:/)
+  assert.match(result.stdout, /conformance report/)
+})

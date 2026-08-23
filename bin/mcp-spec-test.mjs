@@ -14,7 +14,7 @@
 // conformance reporter.
 
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
@@ -43,6 +43,7 @@ const FLAGS = {
   '--header': 'MCP_EXTRA_HEADERS',
   '-H': 'MCP_EXTRA_HEADERS',
   '--output': 'MCP_OUTPUT',
+  '--output-folder': 'MCP_OUTPUT_FOLDER',
   '--spec-version': 'MCP_SPEC_VERSION',
   '--spec-path': 'MCP_SPEC_PATH',
   '--default-version': 'MCP_SERVER_DEFAULT_VERSION',
@@ -154,8 +155,10 @@ Opting in to calls the suite will not guess at
       --verbose                also print the target's own stderr    [MCP_VERBOSE]
       --tap                    raw TAP instead of the report, for CI parsing
       --output <format>        stdio (default, print the report), or md, html or
-                               json to write a file into the working directory
-                                                                     [MCP_OUTPUT]
+                               json to write a file                  [MCP_OUTPUT]
+      --output-folder <dir>    where to write it (default: the current directory);
+                               created if missing, and only used with md, html or
+                               json                          [MCP_OUTPUT_FOLDER]
       --disable-telemetry=1    do not send the anonymous usage counts described
                                in README.md          [MCP_DISABLE_TELEMETRY=1]
   -h, --help                   this message; "help" on its own works too
@@ -285,10 +288,28 @@ if (tap && env.MCP_OUTPUT && env.MCP_OUTPUT !== 'stdio') {
   process.exit(2)
 }
 
-// The tests run with cwd set to the package root, so a report written relative to
-// the process would land inside node_modules. The shell's directory is passed
-// through, the same way @file arguments are resolved above.
-env.MCP_OUTPUT_DIR = process.cwd()
+// Resolved against the shell's directory, not the process's: the tests run with
+// cwd set to the package root, so a relative path would otherwise land inside
+// node_modules — the same reason @file arguments are resolved above.
+env.MCP_OUTPUT_DIR = resolve(process.cwd(), env.MCP_OUTPUT_FOLDER || '.')
+
+// Checked now rather than when the report is written, because by then the run has
+// already happened: a mistyped folder would cost a full conformance run and then
+// throw the results away. A missing folder is created, since asking someone to
+// mkdir a directory this tool is about to write to is pure ceremony.
+if (env.MCP_OUTPUT && env.MCP_OUTPUT !== 'stdio') {
+  try {
+    mkdirSync(env.MCP_OUTPUT_DIR, { recursive: true })
+    accessSync(env.MCP_OUTPUT_DIR, constants.W_OK)
+  } catch (err) {
+    process.stderr.write(`cannot write reports to ${env.MCP_OUTPUT_DIR}: ${err.message}\n`)
+    process.exit(2)
+  }
+} else if (env.MCP_OUTPUT_FOLDER) {
+  // Nothing is going to be written, so say so instead of leaving someone to
+  // wonder where their report went.
+  process.stderr.write('--output-folder has no effect without --output md, html or json\n')
+}
 
 if (!env.MCP_URL && !env.MCP_COMMAND) {
   process.stderr.write(`no target: pass -u <url> or -c "<command>" (or set MCP_URL / MCP_COMMAND)\n${USAGE}\n`)
