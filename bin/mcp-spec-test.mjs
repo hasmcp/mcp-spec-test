@@ -15,6 +15,7 @@
 
 import { spawn } from 'node:child_process'
 import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
@@ -156,7 +157,7 @@ Opting in to calls the suite will not guess at
       --tap                    raw TAP instead of the report, for CI parsing
       --output <format>        stdio (default, print the report), or md, html or
                                json to write a file                  [MCP_OUTPUT]
-      --output-folder <dir>    where to write it (default: the current directory);
+      --output-folder <dir>    where to write it (default: the OS temp directory);
                                created if missing, and only used with md, html or
                                json                          [MCP_OUTPUT_FOLDER]
       --disable-telemetry=1    do not send the anonymous usage counts described
@@ -175,6 +176,15 @@ are listed as NOT VERIFIED — a skip is not a pass.
 `
 
 const env = { ...process.env }
+// Set by node:test on itself, and inherited from here down to the `node --test`
+// this CLI spawns below to run the suite. node:test's own recursion guard reads
+// it to mean "a test runner is already driving this process" and silently skips
+// running any files — so a run invoked from inside a node:test process (this
+// package's own CI included, which runs the CLI from a test to check its
+// output) would report nothing and still exit 0. The guard is about the parent
+// invocation, not the target we are about to spawn, so it has no business
+// reaching that far.
+delete env.NODE_TEST_CONTEXT
 let only = null
 let tap = false
 const argv = process.argv.slice(2)
@@ -288,10 +298,15 @@ if (tap && env.MCP_OUTPUT && env.MCP_OUTPUT !== 'stdio') {
   process.exit(2)
 }
 
-// Resolved against the shell's directory, not the process's: the tests run with
-// cwd set to the package root, so a relative path would otherwise land inside
-// node_modules — the same reason @file arguments are resolved above.
-env.MCP_OUTPUT_DIR = resolve(process.cwd(), env.MCP_OUTPUT_FOLDER || '.')
+// A report nobody asked to keep defaults to the OS temp directory rather than
+// wherever the command happened to be run from — /tmp (or $TMPDIR) on Linux
+// and macOS, the user's Temp folder on Windows — so a run doesn't litter a
+// project checkout or someone's home directory with timestamped files. An
+// explicit --output-folder is still resolved against the shell's directory,
+// not the process's: the tests run with cwd set to the package root, so a
+// relative path would otherwise land inside node_modules — the same reason
+// @file arguments are resolved above.
+env.MCP_OUTPUT_DIR = env.MCP_OUTPUT_FOLDER ? resolve(process.cwd(), env.MCP_OUTPUT_FOLDER) : tmpdir()
 
 // Checked now rather than when the report is written, because by then the run has
 // already happened: a mistyped folder would cost a full conformance run and then

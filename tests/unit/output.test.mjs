@@ -113,10 +113,10 @@ test('two runs do not overwrite each other', () => {
   assert.equal(readdirSync(directory).length, 2)
 })
 
-test('with no directory given it falls back to the process, rather than throwing', () => {
+test('with no directory given it falls back to the OS temp directory, rather than throwing', () => {
   let path = null
   emit(model, { env: { MCP_OUTPUT: 'md' }, write: (p) => { path = p } })
-  assert.equal(path, join(process.cwd(), 'mcpspectest-260823071503.md'))
+  assert.equal(path, join(tmpdir(), 'mcpspectest-260823071503.md'))
 })
 
 // The run is the expensive part — minutes of requests, possibly against a

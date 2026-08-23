@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -125,6 +125,23 @@ test('--tap with an explicit stdio is allowed, since nothing is being asked for'
 test('help documents where reports go', async () => {
   const { stdout } = await run(['help'])
   assert.match(stdout, /--output-folder <dir>/)
+})
+
+test('with no --output-folder, a report lands in the OS temp directory', async () => {
+  // /tmp (or $TMPDIR) on Linux/macOS, the user's Temp folder on Windows — not
+  // wherever the command was run from, so a one-off run does not litter a
+  // project checkout.
+  const before = new Set(readdirSync(tmpdir()))
+
+  await run(['-c', 'true', '--output', 'md'])
+
+  const created = readdirSync(tmpdir()).filter((name) => !before.has(name))
+  try {
+    assert.equal(created.length, 1, `expected one new file in ${tmpdir()}, saw ${created.join(', ')}`)
+    assert.match(created[0], /^mcpspectest-\d{12}\.md$/)
+  } finally {
+    for (const name of created) rmSync(join(tmpdir(), name))
+  }
 })
 
 test('an output folder is created rather than demanded', async () => {
