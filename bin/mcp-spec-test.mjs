@@ -60,6 +60,7 @@ ${pkg.name} ${pkg.version} — conformance test any MCP server against the curre
 Usage
   npx ${pkg.name}@latest -u <url> [options]
   npx ${pkg.name}@latest -c "<command to spawn>" [options]
+  npx ${pkg.name}@latest help
 
 Target (one is required)
   -u, --url <url>              Streamable HTTP endpoint            [MCP_URL]
@@ -147,8 +148,8 @@ Opting in to calls the suite will not guess at
       --tap                    raw TAP instead of the report, for CI parsing
       --disable-telemetry=1    do not send the anonymous usage counts described
                                in README.md          [MCP_DISABLE_TELEMETRY=1]
-  -h, --help                   this message
-  -v, --version                print the version
+  -h, --help                   this message; "help" on its own works too
+  -v, --version                print the version; "version" works too
 
 Supported revisions: 2026-07-28, 2025-11-25. Only these two are reasoned about;
 an older revision a server advertises is reported as out of scope, not judged.
@@ -168,11 +169,14 @@ const argv = process.argv.slice(2)
 for (let i = 0; i < argv.length; i++) {
   const arg = argv[i]
 
-  if (arg === '-h' || arg === '--help') {
+  // `help` and `version` are accepted as bare words as well as flags. Both used
+  // to land in the unknown-option branch, which answered a reasonable guess with
+  // an error and the usage text underneath it.
+  if (arg === '-h' || arg === '--help' || arg === 'help') {
     process.stdout.write(`${USAGE}\n`)
     process.exit(0)
   }
-  if (arg === '-v' || arg === '--version') {
+  if (arg === '-v' || arg === '--version' || arg === 'version') {
     process.stdout.write(`${pkg.version}\n`)
     process.exit(0)
   }
