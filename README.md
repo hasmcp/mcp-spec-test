@@ -953,8 +953,9 @@ MCP_DISABLE_TELEMETRY=1 npx @hasmcp/mcp-spec-test@latest -u "$URL"
 ```
 
 The call is fire-and-forget with a two-second timeout, and every failure is
-silent: it cannot change a verdict, an exit code, or anything printed. It adds no
-requests to the server under test — it reports only what the run already learned.
+silent: it cannot change a verdict, an exit code, or anything printed. No test
+traffic is added either — the name is read from the single pre-flight request the
+suite already makes to see which revisions the server offers.
 
 ## License
 

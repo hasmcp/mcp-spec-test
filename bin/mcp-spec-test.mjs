@@ -448,11 +448,18 @@ async function askServer(transport, revisions, throttled) {
     : { versions: [], via: null, name: handshakeName }
 }
 
+// The pre-flight runs even when --spec-version settles the revision, because it
+// is also where the server's announced name is learned, and a run that skipped it
+// reported no serverId at all. One request buys that; an explicit --spec-version
+// still wins outright, so what gets tested is unchanged either way.
+const detected = await detectRevision()
+
+// Hashed in the reporter, never sent in the clear; see the telemetry section of
+// README.md. Absent when the server announced no name — an endpoint answering 401
+// tells us nothing to hash.
+if (detected?.name) env.MCP_SERVER_NAME = detected.name
+
 if (!env.MCP_SPEC_VERSION) {
-  const detected = await detectRevision()
-  // The announced name, if the pre-flight happened to learn one. Hashed in the
-  // reporter, never sent in the clear; see the telemetry section of README.md.
-  if (detected?.name) env.MCP_SERVER_NAME = detected.name
   if (detected?.revision) {
     env.MCP_SPEC_VERSION = detected.revision
     process.stderr.write(
