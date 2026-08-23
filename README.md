@@ -832,6 +832,59 @@ touched, and a *conformance* suite is the worst place for that: a new case would
 read as the server having regressed. Pinning the major keeps bug fixes flowing
 while a new requirement lands only when you bump it.
 
+## Output formats
+
+By default the report is printed. `--output` writes it to a file instead:
+
+| | |
+| --- | --- |
+| `--output stdio` | print the report (the default; identical to omitting the flag) |
+| `--output md` | write Markdown, for a pull request or a wiki |
+| `--output html` | write a single self-contained HTML file |
+| `--output json` | write JSON, for something that will read it |
+
+```bash
+npx @hasmcp/mcp-spec-test@latest -u "$URL" --output html
+report written to /home/you/mcpspectest-260823071819.html
+
+npx @hasmcp/mcp-spec-test@latest -u "$URL" --output json --output-folder ./reports
+report written to /home/you/reports/mcpspectest-260823072650.json
+```
+
+Files are named `mcpspectest-<YYMMDDHHMMSS>.<ext>`, timestamped in UTC to match the
+`generatedAt` inside. Nothing is overwritten, so repeated runs leave a history;
+`.gitignore` here already covers them, and you may want the same line in yours.
+
+`--output-folder` chooses where they land, relative to where you ran from, and the
+folder is created if it does not exist. It is checked *before* the suite runs — a
+mistyped path should not cost a full conformance run and then throw the results
+away. If the write fails anyway, the report is printed rather than lost.
+
+Only the one line naming the file goes to the terminal — the report itself does
+not, so `--output json` leaves stdout free.
+
+The HTML is deliberately self-contained: no stylesheet, script or font is fetched,
+because an artifact viewer is often offline or behind a strict CSP, and a report
+that renders differently depending on the network is not a record of anything.
+
+The JSON carries a `schema` field (`hasmcp.mcp-spec-test.report/1`) and the same
+verdict, counts and per-case detail as the printed report, plus the cases that did
+not apply to this revision — which the human formats leave out, since they are not
+results that were withheld.
+
+`--output` cannot be combined with `--tap`, which replaces the report wholesale.
+
+### One thing to know about credentials
+
+A token in the target URL is redacted from the report — the parameter name is
+kept, since knowing a token was there explains a lot, but the value is replaced.
+That applies to the printed report too, not only to files.
+
+A secret passed inside `--command` is **not** redacted. It is an arbitrary string,
+and guessing at secrets inside it would be false confidence rather than safety, so
+if you spawn a server with a credential on its command line, treat the report as
+sensitive.
+
 ## What a skip means
 
 A skip is not a pass. `subscriptions/listen` needs a transport that really

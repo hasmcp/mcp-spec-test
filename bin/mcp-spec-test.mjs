@@ -14,9 +14,15 @@
 // conformance reporter.
 
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
+
+// From lib/formats.mjs, not lib/output.mjs: the latter reaches lib/env.mjs
+// through the renderers, and importing that before the flags below are applied
+// would freeze its exports against the wrong environment. See the note in
+// lib/formats.mjs.
+import { FORMAT_NAMES } from '../lib/formats.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
@@ -36,6 +42,8 @@ const FLAGS = {
   '--auth-query-param': 'MCP_AUTH_QUERY_PARAM',
   '--header': 'MCP_EXTRA_HEADERS',
   '-H': 'MCP_EXTRA_HEADERS',
+  '--output': 'MCP_OUTPUT',
+  '--output-folder': 'MCP_OUTPUT_FOLDER',
   '--spec-version': 'MCP_SPEC_VERSION',
   '--spec-path': 'MCP_SPEC_PATH',
   '--default-version': 'MCP_SERVER_DEFAULT_VERSION',
@@ -146,6 +154,11 @@ Opting in to calls the suite will not guess at
       --only <pattern>         run only test files matching a substring
       --verbose                also print the target's own stderr    [MCP_VERBOSE]
       --tap                    raw TAP instead of the report, for CI parsing
+      --output <format>        stdio (default, print the report), or md, html or
+                               json to write a file                  [MCP_OUTPUT]
+      --output-folder <dir>    where to write it (default: the current directory);
+                               created if missing, and only used with md, html or
+                               json                          [MCP_OUTPUT_FOLDER]
       --disable-telemetry=1    do not send the anonymous usage counts described
                                in README.md          [MCP_DISABLE_TELEMETRY=1]
   -h, --help                   this message; "help" on its own works too
@@ -260,6 +273,42 @@ for (const key of ['MCP_TOOL_ARGS', 'MCP_PROMPT_ARGS']) {
     process.exit(2)
   }
   env[key] = `@${absolute}`
+}
+
+if (env.MCP_OUTPUT && !FORMAT_NAMES.includes(env.MCP_OUTPUT)) {
+  process.stderr.write(
+    `--output ${env.MCP_OUTPUT} is not a format: choose ${FORMAT_NAMES.join(', ')}\n`,
+  )
+  process.exit(2)
+}
+// --tap replaces the reporter entirely, so --output would be quietly ignored
+// rather than obeyed. Saying so beats writing no file and explaining nothing.
+if (tap && env.MCP_OUTPUT && env.MCP_OUTPUT !== 'stdio') {
+  process.stderr.write('--tap and --output cannot be combined: --tap replaces the report\n')
+  process.exit(2)
+}
+
+// Resolved against the shell's directory, not the process's: the tests run with
+// cwd set to the package root, so a relative path would otherwise land inside
+// node_modules — the same reason @file arguments are resolved above.
+env.MCP_OUTPUT_DIR = resolve(process.cwd(), env.MCP_OUTPUT_FOLDER || '.')
+
+// Checked now rather than when the report is written, because by then the run has
+// already happened: a mistyped folder would cost a full conformance run and then
+// throw the results away. A missing folder is created, since asking someone to
+// mkdir a directory this tool is about to write to is pure ceremony.
+if (env.MCP_OUTPUT && env.MCP_OUTPUT !== 'stdio') {
+  try {
+    mkdirSync(env.MCP_OUTPUT_DIR, { recursive: true })
+    accessSync(env.MCP_OUTPUT_DIR, constants.W_OK)
+  } catch (err) {
+    process.stderr.write(`cannot write reports to ${env.MCP_OUTPUT_DIR}: ${err.message}\n`)
+    process.exit(2)
+  }
+} else if (env.MCP_OUTPUT_FOLDER) {
+  // Nothing is going to be written, so say so instead of leaving someone to
+  // wonder where their report went.
+  process.stderr.write('--output-folder has no effect without --output md, html or json\n')
 }
 
 if (!env.MCP_URL && !env.MCP_COMMAND) {

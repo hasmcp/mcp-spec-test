@@ -4,3 +4,6 @@ node_modules
 .env
 .env.*
 license.key
+
+# Conformance reports written by --output md|html|json.
+mcpspectest-*
