@@ -38,8 +38,14 @@ jobs:
       # The schema-sanity cases assert that the vendored schema really is the
       # revision the suite claims to test. They need no target, so they run here
       # and would catch a schema swapped for an older revision.
+      #
+      # Listed as two shell-expanded globs rather than "tests/**/*.test.mjs":
+      # node 20 has no glob support in --test at all ("could not find" the
+      # literal string), and node 22/24 resolve a bare directory as a module to
+      # require rather than a tree to search. Plain, non-recursive globs are
+      # the one thing every supported node version and shell agrees on.
       - name: schema-derived assertions agree with the vendored schema
-        run: node --test "tests/**/*.test.mjs"
+        run: node --test tests/*.test.mjs tests/unit/*.test.mjs
 
       # The README lists every case one by one, which is documentation that goes
       # stale the first time someone adds a case. Checked rather than trusted.

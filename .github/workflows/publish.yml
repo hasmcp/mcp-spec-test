@@ -36,10 +36,12 @@ jobs:
       - run: npm ci
 
       # Publishing a suite that does not load would be worse than not publishing.
+      #
+      # Two plain globs, not "tests/**/*.test.mjs" — see ci.yml for why.
       - name: verify the package before publishing
         run: |
           for f in lib/*.mjs bin/*.mjs tests/*.test.mjs tests/unit/*.test.mjs; do node --check "$f"; done
-          node --test "tests/**/*.test.mjs"
+          node --test tests/*.test.mjs tests/unit/*.test.mjs
           node bin/mcp-spec-test.mjs --help > /dev/null
 
       - name: should this run publish?
