@@ -14,7 +14,7 @@
 // conformance reporter.
 
 import { spawn } from 'node:child_process'
-import { accessSync, constants, mkdirSync, readFileSync } from 'node:fs'
+import { accessSync, constants, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
@@ -544,11 +544,29 @@ if (!env.MCP_SPEC_VERSION) {
   }
 }
 
+// Listed rather than passed as a glob: node --test only gained its own glob
+// support in a later release, and this string would otherwise reach node 20 —
+// the oldest version this package claims to support — as a literal filename to
+// look for, matching nothing. Listing the directory ourselves works on every
+// supported version and needs no shell to expand anything, since spawn() below
+// does not use one.
+//
 // Non-recursive on purpose. tests/ holds the conformance cases and tests/unit/
 // holds this package's own tests, and only the first kind belongs in somebody's
 // conformance report — a user asking "is my server conformant" should not be
 // shown a section proving that our PKCE implementation hashes correctly.
-const pattern = only ? `tests/*${only}*.test.mjs` : 'tests/*.test.mjs'
+const caseFiles = readdirSync(join(root, 'tests'))
+  .filter((name) => name.endsWith('.test.mjs') && (!only || name.includes(only)))
+  .map((name) => join('tests', name))
+
+// Passing node --test zero file arguments does not mean "run nothing" — it
+// falls back to node's own default discovery, which would go looking through
+// the whole package rather than reporting the mistyped pattern it actually is.
+if (only && caseFiles.length === 0) {
+  process.stderr.write(`--only ${only} matched no test file\n`)
+  process.exit(2)
+}
+
 const args = ['--test']
 
 // Pacing is per process and node:test gives each file its own, so a limit only
@@ -556,7 +574,7 @@ const args = ['--test']
 // number would silently mean that many per file.
 if (Number(env.MCP_RATE_LIMIT) > 0) args.push('--test-concurrency=1')
 args.push(tap ? '--test-reporter=tap' : `--test-reporter=${join(root, 'lib', 'reporter.mjs')}`)
-args.push(pattern)
+args.push(...caseFiles)
 
 const child = spawn(process.execPath, args, { cwd: root, env, stdio: 'inherit' })
 child.on('exit', (code, signal) => process.exit(signal ? 1 : code ?? 1))
