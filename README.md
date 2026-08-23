@@ -1033,6 +1033,12 @@ silent: it cannot change a verdict, an exit code, or anything printed. No test
 traffic is added either — the name is read from the single pre-flight request the
 suite already makes to see which revisions the server offers.
 
+## Credits
+
+Built by [HasMCP](https://hasmcp.com).
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).
+
+Copyright © 2026 Contextual, Inc.
