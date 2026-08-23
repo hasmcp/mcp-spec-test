@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing (OIDC) + provenance
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +32,10 @@ jobs:
           node-version: '22'
           registry-url: https://registry.npmjs.org
           cache: npm
+
+      # Trusted publishing needs npm 11.5.1+; the version bundled with
+      # setup-node's Node 22 isn't guaranteed to be new enough yet.
+      - run: npm install -g npm@latest
 
       - run: npm ci
 
@@ -44,22 +48,15 @@ jobs:
           node --test tests/*.test.mjs tests/unit/*.test.mjs
           node bin/mcp-spec-test.mjs --help > /dev/null
 
+      # Auth now comes from npm's trusted publisher (OIDC via id-token: write),
+      # not a long-lived NPM_TOKEN — the registry maps this workflow's identity
+      # (org/repo/workflow file) to the package, so there is no secret to check
+      # for. The remaining guard is just: don't publish something already there,
+      # and don't publish a version the tag doesn't actually name.
       - name: should this run publish?
         id: check
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
-
-          # No token is a deliberate state, not a broken build: the repository can
-          # sit for a while before anyone wants a release. Skip with a notice so
-          # the run stays green and the reason is visible, rather than failing
-          # until a secret appears.
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::notice::NPM_TOKEN is not set, so nothing is published. Add the secret to enable releases."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
 
           NAME=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
@@ -85,5 +82,3 @@ jobs:
       - name: npm publish
         if: steps.check.outputs.publish == 'true'
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
