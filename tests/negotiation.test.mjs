@@ -226,6 +226,13 @@ test('an unsupported version offered at the handshake is refused or downgraded, 
   // Either answer is conformant: refuse it, or reply with a version the server
   // does support. Echoing back a revision that does not exist is not, because the
   // client would then speak it.
+  //
+  // Accepting "an error" as proof of refusal makes this case only as trustworthy
+  // as the request that provoked it. It once sent this initialize inside an
+  // already-open session, so a conformant server refused it as a duplicate and
+  // this passed without ever testing the version at all. rpc.call sends the
+  // handshake outside any session now, which is what makes the error below
+  // attributable to the version offered.
   const err = rpcError(res)
   if (err) return
   const negotiated = res.body?.result?.protocolVersion

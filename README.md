@@ -891,7 +891,7 @@ the environment the tests read and runs them under the reporter in
 | `lib/rpc.mjs` | a hand-written client for the revision under test |
 | `lib/schema.mjs` | assertions derived from the published schema |
 | `lib/probe.mjs` | capability discovery, and the guards tests skip on |
-| `lib/session.mjs` | the `initialize` handshake, for revisions that have one |
+| `lib/session.mjs` | the `initialize` handshake, for revisions that have one — opened once, and never re-entered: `initialize` is sent outside any session, because a conformant server refuses a second handshake that reuses a session id |
 | `lib/level.mjs` | the MUST/SHOULD distinction |
 | `lib/oauth.mjs` | OAuth discovery, dynamic registration, both grants |
 | `lib/loopback.mjs` | PKCE, the loopback redirect receiver, opening a browser |

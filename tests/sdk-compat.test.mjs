@@ -146,7 +146,16 @@ test('the handshake settles on a revision inside the supported window', async (t
     },
   })
   if (!requireReachable(t, res, 'initialize')) return
-  if (rpcError(res)) return t.skip(`target does not answer initialize: ${JSON.stringify(rpcError(res))}`)
+  // "Refused", not "does not answer": the server answered, with an error. That
+  // wording mattered — it read as a dead endpoint when the earlier case in this
+  // file had just completed a handshake against the same target, and the real
+  // cause was this suite sending initialize inside a session it had already
+  // opened. rpc.call no longer does that; the skip stays for a server that
+  // genuinely will not negotiate, where there is no negotiated revision to judge.
+  if (rpcError(res)) {
+    return t.skip(`target refused a fresh initialize: ${JSON.stringify(rpcError(res))} — `
+      + 'so which revision it negotiates could not be established')
+  }
 
   const negotiated = res.body?.result?.protocolVersion
   assert.ok(negotiated, `initialize must return a protocolVersion, got ${JSON.stringify(res.body?.result)}`)
