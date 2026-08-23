@@ -219,7 +219,7 @@ test('an unsupported version offered at the handshake is refused or downgraded, 
     params: {
       protocolVersion: '1999-01-01',
       capabilities: {},
-      clientInfo: { name: 'mcp-spec-test', version: '1.0.0' },
+      clientInfo: { name: 'mcp-spec-test', version: '0.1.0' },
     },
   })
 

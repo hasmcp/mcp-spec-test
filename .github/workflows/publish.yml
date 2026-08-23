@@ -7,7 +7,7 @@
 #
 # So publishing is an explicit act with its own gesture:
 #
-#   git tag v1.0.0 && git push origin v1.0.0
+#   git tag v0.1.0 && git push origin v0.1.0
 #
 # which means main can be pushed freely, including work that is finished but not
 # yet meant for anybody else. workflow_dispatch stays for a manual re-run.
