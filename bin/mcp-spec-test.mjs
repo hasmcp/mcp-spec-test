@@ -18,6 +18,12 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
+// From lib/formats.mjs, not lib/output.mjs: the latter reaches lib/env.mjs
+// through the renderers, and importing that before the flags below are applied
+// would freeze its exports against the wrong environment. See the note in
+// lib/formats.mjs.
+import { FORMAT_NAMES } from '../lib/formats.mjs'
+
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -36,6 +42,7 @@ const FLAGS = {
   '--auth-query-param': 'MCP_AUTH_QUERY_PARAM',
   '--header': 'MCP_EXTRA_HEADERS',
   '-H': 'MCP_EXTRA_HEADERS',
+  '--output': 'MCP_OUTPUT',
   '--spec-version': 'MCP_SPEC_VERSION',
   '--spec-path': 'MCP_SPEC_PATH',
   '--default-version': 'MCP_SERVER_DEFAULT_VERSION',
@@ -146,6 +153,9 @@ Opting in to calls the suite will not guess at
       --only <pattern>         run only test files matching a substring
       --verbose                also print the target's own stderr    [MCP_VERBOSE]
       --tap                    raw TAP instead of the report, for CI parsing
+      --output <format>        stdio (default, print the report), or md, html or
+                               json to write a file into the working directory
+                                                                     [MCP_OUTPUT]
       --disable-telemetry=1    do not send the anonymous usage counts described
                                in README.md          [MCP_DISABLE_TELEMETRY=1]
   -h, --help                   this message; "help" on its own works too
@@ -261,6 +271,24 @@ for (const key of ['MCP_TOOL_ARGS', 'MCP_PROMPT_ARGS']) {
   }
   env[key] = `@${absolute}`
 }
+
+if (env.MCP_OUTPUT && !FORMAT_NAMES.includes(env.MCP_OUTPUT)) {
+  process.stderr.write(
+    `--output ${env.MCP_OUTPUT} is not a format: choose ${FORMAT_NAMES.join(', ')}\n`,
+  )
+  process.exit(2)
+}
+// --tap replaces the reporter entirely, so --output would be quietly ignored
+// rather than obeyed. Saying so beats writing no file and explaining nothing.
+if (tap && env.MCP_OUTPUT && env.MCP_OUTPUT !== 'stdio') {
+  process.stderr.write('--tap and --output cannot be combined: --tap replaces the report\n')
+  process.exit(2)
+}
+
+// The tests run with cwd set to the package root, so a report written relative to
+// the process would land inside node_modules. The shell's directory is passed
+// through, the same way @file arguments are resolved above.
+env.MCP_OUTPUT_DIR = process.cwd()
 
 if (!env.MCP_URL && !env.MCP_COMMAND) {
   process.stderr.write(`no target: pass -u <url> or -c "<command>" (or set MCP_URL / MCP_COMMAND)\n${USAGE}\n`)
