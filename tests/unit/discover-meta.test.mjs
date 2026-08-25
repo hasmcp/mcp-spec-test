@@ -27,6 +27,11 @@
 // failing spec, on the transport where it matters (stdio has no header to
 // omit, which is why the first fix looked complete under a stdio fixture).
 //
+// A third bug lived in the same six calls: 2026-07-28's "Standard Request
+// Headers" table requires Mcp-Method — mirroring the JSON-RPC method name —
+// on every request, with no carve-out for discover either. rpc.mjs's call()
+// never sent it at all, for any method, on any request.
+//
 // Driven through the real binary against a real socket, so a regression in
 // discover.test.mjs's own call arguments — not just in rpc.mjs — trips this
 // file.
@@ -80,6 +85,14 @@ async function stableSdkV2Server() {
           message: `Mcp-Protocol-Version header (${headerVersion ?? 'missing'}) does not match `
             + `_meta protocolVersion (${protocolVersion})`,
         },
+      })
+    }
+
+    // Required on every request, mirroring the JSON-RPC method name — no
+    // exception for discover.
+    if (req.headers['mcp-method'] !== msg.method) {
+      return send({
+        error: { code: -32020, message: `missing or mismatched Mcp-Method header for ${msg.method}` },
       })
     }
 
