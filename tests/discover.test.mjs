@@ -38,7 +38,7 @@ test('server/discover is answered without a session or handshake', async (t) => 
   if (!requireTarget(t)) return
   if (!requireDiscover(t)) return
 
-  const res = await call(DISCOVER, { version: null, meta: false, headerVersion: null })
+  const res = await call(DISCOVER, { headerVersion: null })
   if (!requireReachable(t, res, DISCOVER)) return
   assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(res.body)}`)
 
@@ -54,7 +54,7 @@ test('server/discover advertises the versions the server can serve', async (t) =
   if (!requireTarget(t)) return
   if (!requireDiscover(t)) return
 
-  const res = await call(DISCOVER, { version: null, meta: false, headerVersion: null })
+  const res = await call(DISCOVER, { headerVersion: null })
   if (!requireReachable(t, res, DISCOVER)) return
   const out = result(res, DISCOVER)
   assert.ok(Array.isArray(out.supportedVersions), 'supportedVersions must be an array')
@@ -80,7 +80,7 @@ test('server/discover is a CacheableResult with usable cache hints', async (t) =
   if (!requireTarget(t)) return
   if (!requireDiscover(t)) return
 
-  const res = await call(DISCOVER, { version: null, meta: false, headerVersion: null })
+  const res = await call(DISCOVER, { headerVersion: null })
   if (!requireReachable(t, res, DISCOVER)) return
   const out = result(res, DISCOVER)
 
@@ -95,7 +95,7 @@ test('server/discover reports server identity and capabilities', async (t) => {
   if (!requireTarget(t)) return
   if (!requireDiscover(t)) return
 
-  const res = await call(DISCOVER, { version: null, meta: false, headerVersion: null })
+  const res = await call(DISCOVER, { headerVersion: null })
   if (!requireReachable(t, res, DISCOVER)) return
   const out = result(res, DISCOVER)
   assert.equal(typeof out.capabilities, 'object', 'capabilities must be an object')
@@ -112,9 +112,9 @@ test('server/discover is stable across calls within its own TTL', async (t) => {
   if (!requireTarget(t)) return
   if (!requireDiscover(t)) return
 
-  const first = await call(DISCOVER, { version: null, meta: false, headerVersion: null })
+  const first = await call(DISCOVER, { headerVersion: null })
   if (!requireReachable(t, first, DISCOVER)) return
-  const second = await call(DISCOVER, { version: null, meta: false, headerVersion: null })
+  const second = await call(DISCOVER, { headerVersion: null })
   if (!requireReachable(t, second, DISCOVER)) return
   const a = result(first, DISCOVER)
   const b = result(second, DISCOVER)
@@ -133,7 +133,7 @@ test('server/discover advertises a revision this suite supports', async (t) => {
   if (!requireTarget(t)) return
   if (!requireDiscover(t)) return
 
-  const res = await call(DISCOVER, { version: null, meta: false, headerVersion: null })
+  const res = await call(DISCOVER, { headerVersion: null })
   if (!requireReachable(t, res, DISCOVER)) return
   const out = result(res, DISCOVER)
   const overlap = (out.supportedVersions ?? []).filter(inWindow)
