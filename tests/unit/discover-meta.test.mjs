@@ -1,7 +1,10 @@
-// server/discover must still be asked for with the per-request _meta
-// 2026-07-28 requires — even though it needs no handshake or session.
+// server/discover must still be asked for with the per-request _meta AND the
+// matching MCP-Protocol-Version header 2026-07-28 requires — even though it
+// needs no handshake or session.
 //
-// This pins hasmcp/mcp-spec-test#10. The discover cases sent
+// This pins two bugs found back to back in the same six calls.
+//
+// hasmcp/mcp-spec-test#10: the discover cases sent
 // `call(DISCOVER, { version: null, meta: false, headerVersion: null })`,
 // meant to keep the probe free of any prior handshake/session, but
 // `meta: false` also stripped the per-request `_meta` that 2026-07-28
@@ -9,14 +12,24 @@
 // spec/2026-07-28/schema.json: RequestParams.required includes "_meta", and
 // RequestMetaObject.required includes protocolVersion and
 // clientCapabilities, with no carve-out for discover just because it is
-// handshake-free.
+// handshake-free. A server built against the stable official SDK dispatches
+// a request with no _meta to its legacy-era handler, where server/discover is
+// undefined, and answers -32601.
 //
-// A server built against the stable official SDK dispatches a request with no
-// _meta to its legacy-era handler, where server/discover is undefined, and
-// answers -32601 — so the suite was certifying a spec-compliant server as
-// "not conformant" on every discover case. Driven through the real binary
-// against a real socket, so a regression in discover.test.mjs's own call
-// arguments — not just in rpc.mjs — trips this file.
+// Fixing that by simply dropping `meta: false` (and `version: null`) left
+// `headerVersion: null` behind, which is the second bug: the Streamable HTTP
+// transport spec requires "Every POST request to the MCP endpoint MUST
+// include an MCP-Protocol-Version header", and that "the header value MUST
+// match the io.modelcontextprotocol/protocolVersion field carried in the
+// request body's _meta" — again with no exception for discover. Sending
+// _meta.protocolVersion with no matching header is exactly the mismatch a
+// conformant server MUST reject, so the suite's own probe was now the thing
+// failing spec, on the transport where it matters (stdio has no header to
+// omit, which is why the first fix looked complete under a stdio fixture).
+//
+// Driven through the real binary against a real socket, so a regression in
+// discover.test.mjs's own call arguments — not just in rpc.mjs — trips this
+// file.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -32,7 +45,9 @@ const bin = join(root, 'bin', 'mcp-spec-test.mjs')
 // stable v2 API, exactly as described in the issue: server/discover answers
 // only when _meta carries protocolVersion and clientCapabilities: a bare
 // request falls through to the legacy dispatch, where the method does not
-// exist, and comes back -32601.
+// exist, and comes back -32601. It also enforces the Streamable HTTP
+// transport's own requirement that the MCP-Protocol-Version header agree
+// with _meta.protocolVersion, as a spec-compliant HTTP server is entitled to.
 async function stableSdkV2Server() {
   const server = createServer(async (req, res) => {
     let body = ''
@@ -49,11 +64,25 @@ async function stableSdkV2Server() {
     }
 
     const meta = msg.params?._meta ?? {}
-    const hasProtocolVersion = !!meta['io.modelcontextprotocol/protocolVersion']
+    const protocolVersion = meta['io.modelcontextprotocol/protocolVersion']
     const hasClientCapabilities = !!meta['io.modelcontextprotocol/clientCapabilities']
-    if (!hasProtocolVersion || !hasClientCapabilities) {
+    if (!protocolVersion || !hasClientCapabilities) {
       return send({ error: { code: -32601, message: 'Method not found: server/discover' } })
     }
+
+    // The Streamable HTTP transport requires this header on every POST, and
+    // that it matches _meta.protocolVersion — with no exception for discover.
+    const headerVersion = req.headers['mcp-protocol-version']
+    if (headerVersion !== protocolVersion) {
+      return send({
+        error: {
+          code: -32020,
+          message: `Mcp-Protocol-Version header (${headerVersion ?? 'missing'}) does not match `
+            + `_meta protocolVersion (${protocolVersion})`,
+        },
+      })
+    }
+
     return send({
       result: {
         resultType: 'DiscoverResult',
