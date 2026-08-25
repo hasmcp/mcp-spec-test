@@ -133,7 +133,11 @@ test('a request with no version at all is served on the default', async (t) => {
 
   const { ok: discoverAnswered } = await probe()
   const method = FEATURES.discover && discoverAnswered ? DISCOVER : await negotiationMethod()
-  const res = await call(method, { version: null, meta: false, headerVersion: null })
+  // Version-less on purpose, but Mcp-Method mirrors the method name regardless
+  // of whether a version is declared — see probe.mjs's own discover call for
+  // why omitting it reads as malformed to a server that already speaks
+  // 2026-07-28's transport.
+  const res = await call(method, { version: null, meta: false, headerVersion: null, extraHeaders: { 'mcp-method': method } })
   if (!requireReachable(t, res, method)) return
   assert.equal(
     res.status,
