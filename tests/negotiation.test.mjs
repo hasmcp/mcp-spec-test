@@ -123,16 +123,28 @@ test('an unsupported version is rejected with a 400 on Streamable HTTP', async (
 // stateful server legitimately refuses tools/list outside a session, and calling
 // that a negotiation failure would be wrong.
 //
-// server/discover is sessionless by definition, so it is used wherever the server
-// actually answers it — which is what the probe already established. Where it does
-// not, the server is either handshake-based (rpc.call has opened the session by
-// now) or does not implement discover at all, and using discover there would just
-// restate a failure the discover cases already report.
+// That is exactly the trap a version-less request sets when the target does
+// not itself advertise the revision under test. A dual-era server is
+// explicitly permitted (Streamable HTTP's Protocol Version Header section:
+// "a server that supports clients implementing protocol versions earlier
+// than 2025-06-18 ... MAY treat a request that omits the header as protocol
+// version 2025-03-26") to default an under-declared request to a much older,
+// handshake-based revision — one this suite is not performing the handshake
+// for, since it is testing 2026-07-28's session-less model. Whatever method
+// gets picked, a server that then refuses it as "needs a session first" is
+// being correctly stateful under its own chosen default, not failing this
+// requirement; there is no method choice that sidesteps that, discover
+// included, once the target's default might not be the revision under test
+// at all. So this only runs against a target that has already told us (via
+// `requireLatest`, the same gate every other case in this file uses) that it
+// serves the revision under test — where a version-less request served
+// under anything else would itself be the deviation worth reporting.
 test('a request with no version at all is served on the default', async (t) => {
   if (!requireTarget(t)) return
+  const p = await requireLatest(t)
+  if (!p) return
 
-  const { ok: discoverAnswered } = await probe()
-  const method = FEATURES.discover && discoverAnswered ? DISCOVER : await negotiationMethod()
+  const method = FEATURES.discover ? DISCOVER : await negotiationMethod()
   // Version-less on purpose, but Mcp-Method mirrors the method name regardless
   // of whether a version is declared — see probe.mjs's own discover call for
   // why omitting it reads as malformed to a server that already speaks
@@ -151,11 +163,10 @@ test('a request with no version at all is served on the default', async (t) => {
     `a version-less ${method} must be served, not refused: ${JSON.stringify(rpcError(res))}`,
   )
 
-  const { defaultVersion } = await probe()
-  if (defaultVersion && res.headers.get('mcp-protocol-version')) {
+  if (p.defaultVersion && res.headers.get('mcp-protocol-version')) {
     assert.equal(
       res.headers.get('mcp-protocol-version'),
-      defaultVersion,
+      p.defaultVersion,
       'a version-less request should negotiate the server default, consistently',
     )
   }
